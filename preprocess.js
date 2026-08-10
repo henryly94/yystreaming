@@ -311,7 +311,8 @@ async function main() {
   console.log(`\nFound ${persistedQueue.length} files in queue needing optimization.\n`);
 
   let totalFiles = persistedQueue.length;
-  let current  while (true) {
+  let currentIndex = 0;
+  while (true) {
     if (isPausedState()) {
       console.log('[Preprocessor]: Optimization is paused. Exiting loop.');
       writeStatus({ isRunning: false, isPaused: true });
