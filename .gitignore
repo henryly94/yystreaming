@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Production build outputs
+client/dist/
+client/build/
+
+# Temporary transcode files
+*.tmp
+*.mp4.tmp
+*.srt.tmp
+
+# Local server settings, metadata caches, and state
+server/settings.json
+server/library_metadata_cache.json
+server/preprocess_queue.json
+server/preprocess_status.json
+
+# Operating System & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
