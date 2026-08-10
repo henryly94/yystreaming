@@ -877,6 +877,9 @@ app.post('/api/library/optimize/resume', (req, res) => {
   } catch (e) {
     console.error('Error resuming optimization:', e);
     return res.status(500).json({ error: 'Failed to resume optimization' });
+  }
+});
+
 // Serve built static frontend bundle in production mode if client/dist exists
 const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDistPath)) {
