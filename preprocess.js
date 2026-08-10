@@ -187,7 +187,7 @@ function scanDirectory(dir, videoFiles = []) {
 // Check stream types inside file
 function probeStreams(filePath) {
   try {
-    const stdout = execSync(`"${ffprobeCmd}" -v error -show_entries stream=index,codec_type,codec_name -of json "${filePath}"`);
+    const stdout = execSync(`"${ffprobeCmd}" -v error -show_entries stream=index,codec_type,codec_name,pix_fmt -of json "${filePath}"`);
     return JSON.parse(stdout.toString());
   } catch (e) {
     console.error('Error probing streams:', e.message);
@@ -210,6 +210,14 @@ function getTextSubtitleStream(probeData) {
     s.codec_type === 'subtitle' && 
     textSubtitleCodecs.includes(s.codec_name)
   );
+}
+
+function getVideoStream(probeData) {
+  return probeData.streams.find(s => s.codec_type === 'video');
+}
+
+function getAudioStream(probeData) {
+  return probeData.streams.find(s => s.codec_type === 'audio');
 }
 
 const STATUS_FILE = path.join(__dirname, 'server', 'preprocess_status.json');
@@ -387,32 +395,70 @@ async function main() {
       }
     }
 
-    // 2. Transcode to Web-Optimized MP4 (H.264 + AAC) with burned-in subtitles
-    console.log(`  -> Transcoding to MP4...`);
-    const transcodeStart = Date.now();
+    // 2. Determine Smart Remux vs. Transcode Strategy
+    const videoStream = getVideoStream(probeData);
+    const audioStream = getAudioStream(probeData);
 
+    const videoCodec = videoStream ? (videoStream.codec_name || '').toLowerCase() : '';
+    const pixFmt = videoStream ? (videoStream.pix_fmt || '').toLowerCase() : '';
+    const audioCodec = audioStream ? (audioStream.codec_name || '').toLowerCase() : '';
+
+    const isH264 = videoCodec === 'h264';
+    const is8Bit = !pixFmt || pixFmt === 'yuv420p';
+    const isAacOrMp3 = ['aac', 'mp3'].includes(audioCodec);
+
+    const transcodeStart = Date.now();
     const escapedSrtName = srtFileName.replace(/'/g, "\\'");
     const tempOutputFileName = item.baseName + '.mp4.tmp';
-    const isAss = srtFileName.toLowerCase().endsWith('.ass') || srtFileName.toLowerCase().endsWith('.ssa');
 
-    const ffmpegArgs = [
-      '-y',
-      '-i', item.fileName,
-      '-vf', hasSrt 
-        ? `scale='min(1920,iw)':-2,format=yuv420p,subtitles='${escapedSrtName}':force_style='PlayResY=1080,FontSize=28,MarginV=25'`
-        : "scale='min(1920,iw)':-2,format=yuv420p",
-      '-c:v', 'libx264',
-      '-preset', 'fast',
-      '-crf', '21',
-      '-c:a', 'aac',
-      '-ac', '2',
-      '-b:a', '192k'
-    ];
+    const ffmpegArgs = ['-y', '-i', item.fileName];
 
     if (hasSrt) {
-      ffmpegArgs.push('-metadata', 'comment=subtitles_burned_v4');
+      // Subtitles present: Transcode video with burned-in subtitles for AirPlay/TV rendering
+      console.log(`  -> Subtitles present: Transcoding video with burned-in subtitles...`);
+      ffmpegArgs.push(
+        '-vf', `scale='min(1920,iw)':-2,format=yuv420p,subtitles='${escapedSrtName}':force_style='PlayResY=1080,FontSize=28,MarginV=25'`,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '21',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '192k',
+        '-metadata', 'comment=subtitles_burned_v4'
+      );
+    } else if (isH264 && is8Bit && isAacOrMp3) {
+      // Direct 2-Second Remux! No re-encoding needed!
+      console.log(`  -> Video is H.264 8-bit (${audioCodec.toUpperCase() || 'AAC'} audio) with no subtitles to burn.`);
+      console.log(`  -> Performing ultra-fast 2-second stream remux (-c:v copy -c:a copy)...`);
+      ffmpegArgs.push(
+        '-c:v', 'copy',
+        '-c:a', 'copy',
+        '-metadata', 'comment=no_subtitles'
+      );
+    } else if (isH264 && is8Bit) {
+      // Video is H.264 8-bit, Audio is FLAC/OPUS/AC3: Copy video stream, fast-transcode audio to AAC!
+      console.log(`  -> Video is H.264 8-bit (${audioCodec.toUpperCase()} audio) with no subtitles to burn.`);
+      console.log(`  -> Copying video stream and converting audio to AAC (-c:v copy -c:a aac)...`);
+      ffmpegArgs.push(
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '192k',
+        '-metadata', 'comment=no_subtitles'
+      );
     } else {
-      ffmpegArgs.push('-metadata', 'comment=no_subtitles');
+      // Video is HEVC / 10-bit / AV1 / VP9: Transcode to 8-bit H.264 for browser compatibility
+      console.log(`  -> Video is ${videoCodec.toUpperCase() || 'HEVC'} (${pixFmt || '10-bit'}): Transcoding to 8-bit H.264...`);
+      ffmpegArgs.push(
+        '-vf', "scale='min(1920,iw)':-2,format=yuv420p",
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '21',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '192k',
+        '-metadata', 'comment=no_subtitles'
+      );
     }
 
     ffmpegArgs.push('-f', 'mp4', tempOutputFileName);
