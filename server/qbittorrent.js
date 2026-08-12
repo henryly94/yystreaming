@@ -12,12 +12,15 @@ export class QBittorrentClient {
   }
 
   async login() {
+    this.lastError = null;
     try {
       const params = new URLSearchParams();
       params.append("username", this.username);
       params.append("password", this.password);
 
       const originUrl = `http://${this.host}:${this.port}`;
+      console.log(`[qBittorrent]: Connecting to ${this.baseUrl}/auth/login (user: '${this.username}')...`);
+      
       const res = await fetch(`${this.baseUrl}/auth/login`, {
         method: "POST",
         headers: { 
@@ -50,12 +53,32 @@ export class QBittorrentClient {
           this.cookie = `SID=${sid}`;
           console.log('[qBittorrent Login]: Successfully authenticated!');
           return true;
+        } else {
+          this.lastError = `Login response was Ok, but no SID cookie was returned. Text: ${text}`;
         }
+      } else {
+        this.lastError = `Authentication failed (HTTP ${res.status}): ${text || 'Invalid username or password'}`;
       }
       return false;
     } catch (err) {
+      this.lastError = `Connection error (${this.host}:${this.port}): ${err.message}`;
       console.error("[qBittorrent]: Login request failed:", err.message);
       return false;
+    }
+  }
+
+  async testConnection() {
+    const success = await this.login();
+    if (!success) {
+      return { success: false, error: this.lastError || "Authentication failed" };
+    }
+
+    try {
+      const verRes = await this.request('/app/version');
+      const version = verRes.ok ? await verRes.text() : 'Unknown';
+      return { success: true, version: version.trim() };
+    } catch (err) {
+      return { success: true, version: 'Connected' };
     }
   }
 
@@ -63,7 +86,7 @@ export class QBittorrentClient {
     if (!this.cookie) {
       const loggedIn = await this.login();
       if (!loggedIn) {
-        throw new Error("Failed to authenticate with qBittorrent Web UI");
+        throw new Error(this.lastError || "Failed to authenticate with qBittorrent Web UI");
       }
     }
 

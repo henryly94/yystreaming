@@ -32,11 +32,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [qbPort, setQbPort] = useState(8080);
   const [qbUsername, setQbUsername] = useState('admin');
   const [qbPassword, setQbPassword] = useState('adminadmin');
+  const [testStatus, setTestStatus] = useState<{ loading: boolean; success?: boolean; msg: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRescanning, setIsRescanning] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [copiedIp, setCopiedIp] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const handleTestQb = async () => {
+    setTestStatus({ loading: true, msg: 'Testing connection...' });
+    try {
+      const res = await fetch('/api/qbittorrent/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qbHost, qbPort, qbUsername, qbPassword })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestStatus({ loading: false, success: true, msg: data.message });
+      } else {
+        setTestStatus({ loading: false, success: false, msg: data.error || 'Connection failed' });
+      }
+    } catch (e: any) {
+      setTestStatus({ loading: false, success: false, msg: 'Network error: ' + e.message });
+    }
+  };
 
   const checkOptimizeStatus = async () => {
     try {
@@ -215,6 +235,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   placeholder="••••••••"
                 />
               </div>
+            </div>
+
+            <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleTestQb}
+                disabled={testStatus?.loading}
+                style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+              >
+                {testStatus?.loading ? 'Testing...' : 'Test Connection'}
+              </button>
+              {testStatus && (
+                <span style={{
+                  fontSize: '0.78rem',
+                  color: testStatus.success ? '#4ade80' : '#fca5a5',
+                  fontWeight: 500
+                }}>
+                  {testStatus.msg}
+                </span>
+              )}
             </div>
           </div>
 

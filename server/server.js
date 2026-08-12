@@ -393,6 +393,30 @@ app.post('/api/settings', (req, res) => {
   });
 });
 
+// Test qBittorrent connection & credentials
+app.post('/api/qbittorrent/test', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const config = {
+      qbHost: req.body.qbHost || settings.qbHost,
+      qbPort: req.body.qbPort || settings.qbPort,
+      qbUsername: req.body.qbUsername || settings.qbUsername,
+      qbPassword: req.body.qbPassword || settings.qbPassword
+    };
+
+    const qb = new QBittorrentClient(config);
+    const testResult = await qb.testConnection();
+
+    if (testResult.success) {
+      return res.json({ success: true, message: `Connected to qBittorrent (${testResult.version})` });
+    } else {
+      return res.status(400).json({ success: false, error: testResult.error });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Get catalog lists
 app.get('/api/library', (req, res) => {
   const settings = getSettings();
