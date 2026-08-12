@@ -10,12 +10,13 @@ interface Settings {
   qbPort?: number;
   qbUsername?: string;
   qbPassword?: string;
+  qbPathPrefix?: string;
 }
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (videoDir: string, qbConfig?: { qbHost: string; qbPort: number; qbUsername: string; qbPassword: string }) => Promise<boolean>;
+  onSave: (videoDir: string, qbConfig?: { qbHost: string; qbPort: number; qbUsername: string; qbPassword: string; qbPathPrefix?: string }) => Promise<boolean>;
   onRescan: () => Promise<void>;
   currentSettings: Settings | null;
 }
@@ -32,6 +33,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [qbPort, setQbPort] = useState(8080);
   const [qbUsername, setQbUsername] = useState('admin');
   const [qbPassword, setQbPassword] = useState('adminadmin');
+  const [qbPathPrefix, setQbPathPrefix] = useState('');
   const [testStatus, setTestStatus] = useState<{ loading: boolean; success?: boolean; msg: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRescanning, setIsRescanning] = useState(false);
@@ -101,6 +103,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (currentSettings) {
       setVideoDir(currentSettings.videoDir);
+      if (currentSettings.qbHost) setQbHost(currentSettings.qbHost);
+      if (currentSettings.qbPort) setQbPort(currentSettings.qbPort);
+      if (currentSettings.qbUsername) setQbUsername(currentSettings.qbUsername);
+      if (currentSettings.qbPassword) setQbPassword(currentSettings.qbPassword);
+      if (currentSettings.qbPathPrefix) setQbPathPrefix(currentSettings.qbPathPrefix);
     }
   }, [currentSettings, isOpen]);
 
@@ -134,7 +141,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    const success = await onSave(videoDir, { qbHost, qbPort, qbUsername, qbPassword });
+    const success = await onSave(videoDir, { qbHost, qbPort, qbUsername, qbPassword, qbPathPrefix });
     setIsSaving(false);
     if (success) {
       onClose();
@@ -235,6 +242,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   placeholder="••••••••"
                 />
               </div>
+            </div>
+
+            <div style={{ marginTop: '12px' }}>
+              <label className="form-label">qBittorrent Container Path (Docker Optional)</label>
+              <input
+                type="text"
+                className="input-text"
+                value={qbPathPrefix}
+                onChange={(e) => setQbPathPrefix(e.target.value)}
+                placeholder="e.g. /downloads"
+              />
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                If qBittorrent runs in Docker with <code style={{ color: 'var(--primary)' }}>-v /mnt/media_disk/downloads:/downloads</code>, set this to <code style={{ color: 'var(--primary)' }}>/downloads</code>.
+              </span>
             </div>
 
             <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>

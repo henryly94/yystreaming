@@ -352,6 +352,7 @@ app.get('/api/settings', (req, res) => {
     qbPort: settings.qbPort || 8080,
     qbUsername: settings.qbUsername || 'admin',
     qbPassword: settings.qbPassword || '',
+    qbPathPrefix: settings.qbPathPrefix || '',
     localIps: getLocalIps(),
     ffmpegAvailable: checkFfmpeg()
   });
@@ -359,7 +360,7 @@ app.get('/api/settings', (req, res) => {
 
 // Update settings
 app.post('/api/settings', (req, res) => {
-  const { videoDir, qbHost, qbPort, qbUsername, qbPassword } = req.body;
+  const { videoDir, qbHost, qbPort, qbUsername, qbPassword, qbPathPrefix } = req.body;
   if (!videoDir) {
     return res.status(400).json({ error: 'videoDir is required' });
   }
@@ -382,6 +383,7 @@ app.post('/api/settings', (req, res) => {
   if (qbPort !== undefined) settings.qbPort = parseInt(qbPort, 10) || 8080;
   if (qbUsername !== undefined) settings.qbUsername = qbUsername;
   if (qbPassword !== undefined) settings.qbPassword = qbPassword;
+  if (qbPathPrefix !== undefined) settings.qbPathPrefix = qbPathPrefix;
 
   saveSettings(settings);
 
@@ -392,6 +394,7 @@ app.post('/api/settings', (req, res) => {
     qbHost: settings.qbHost,
     qbPort: settings.qbPort,
     qbUsername: settings.qbUsername,
+    qbPathPrefix: settings.qbPathPrefix,
     localIps: getLocalIps(),
     ffmpegAvailable: checkFfmpeg()
   });
@@ -1052,6 +1055,16 @@ app.post('/api/rss/subscribe', async (req, res) => {
       console.error('Non-blocking Mikan cover download failed:', err.message);
     });
 
+    // Helper to translate host targetShowDir to qBittorrent Docker container path
+    const getQbSavePath = (showDir) => {
+      if (settings.qbPathPrefix && settings.videoDir) {
+        const rel = path.relative(settings.videoDir, showDir);
+        return path.posix.join(settings.qbPathPrefix.trim(), rel.replace(/\\/g, '/'));
+      }
+      return showDir;
+    };
+    const qbSavePath = getQbSavePath(targetShowDir);
+
     // 2. Initialize qBittorrent Client
     const qb = new QBittorrentClient(settings);
     const downloadUrls = selectedEpisodes.map(ep => ep.downloadUrl).filter(Boolean);
@@ -1063,7 +1076,7 @@ app.post('/api/rss/subscribe', async (req, res) => {
     if (downloadUrls.length > 0) {
       torrentsAdded = await qb.addTorrents({
         urls: downloadUrls,
-        savePath: targetShowDir,
+        savePath: qbSavePath,
         category: 'yyStreaming'
       });
     }
@@ -1077,7 +1090,7 @@ app.post('/api/rss/subscribe', async (req, res) => {
 
     rssRuleAdded = await qb.setRssRule({
       ruleName: `${showName} Auto-Download`,
-      savePath: targetShowDir,
+      savePath: qbSavePath,
       feedPath: cleanFeedPath,
       feedUrl: rssUrl
     });
