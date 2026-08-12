@@ -209,28 +209,16 @@ function scanLibrary(videoDir) {
           const nameWithoutExt = path.basename(file.fileName, ext);
           const relPathNormalized = file.relativePath.replace(/\\/g, '/');
 
-          if (['.mp4', '.webm', '.mkv', '.mov', '.avi'].includes(ext)) {
-            // Skip files that were modified within the last 2 minutes (likely downloading or copying)
-            try {
-              const stat = fs.statSync(file.absolutePath);
-              const lastModifiedAge = (Date.now() - stat.mtimeMs) / 1000;
-              if (lastModifiedAge < 120) {
-                console.log(`[Scanner]: Skipping incomplete/downloading file: ${file.fileName}`);
-                continue;
-              }
-            } catch (statErr) {
-              console.error(`[Scanner]: Failed to get stats for ${file.fileName}:`, statErr.message);
-              continue;
-            }
-
-            videoFiles.push({ 
-              name: file.fileName, 
-              nameWithoutExt, 
-              ext, 
-              path: file.absolutePath,
-              relativePath: relPathNormalized
-            });
-          } else if (['.srt', '.vtt', '.ass', '.ssa'].includes(ext)) {
+            if (['.mp4', '.webm', '.mkv', '.mov', '.avi'].includes(ext)) {
+              // Include video file even if currently downloading
+              videoFiles.push({ 
+                name: file.fileName, 
+                nameWithoutExt, 
+                ext, 
+                path: file.absolutePath,
+                relativePath: relPathNormalized
+              });
+            } else if (['.srt', '.vtt', '.ass', '.ssa'].includes(ext)) {
             // Index subtitle by its normalized relative path without extension, stripping language tags
             const relPathNoExt = relPathNormalized.slice(0, -ext.length).toLowerCase();
             const strippedKey = relPathNoExt.replace(/\.(chs|cht|zh-hans|zh-hant|zh-cn|zh-tw|zh-hk|zh|eng|en|chi|zho)$/i, '');
@@ -316,7 +304,7 @@ function scanLibrary(videoDir) {
           });
         }
 
-        if (episodes.length > 0) {
+        if (episodes.length > 0 || coverFile || allFiles.some(f => f.fileName.includes('.!qB'))) {
           shows.push({
             id: showId,
             name: showDirName,
