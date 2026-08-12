@@ -54,12 +54,12 @@ export class QBittorrentClient {
         if (sid) {
           this.cookie = `SID=${sid}`;
           console.log('[qBittorrent Login]: Successfully authenticated with SID cookie.');
-          return true;
         } else {
-          this.lastError = `Invalid username or password (qBittorrent did not issue a SID cookie).`;
-          console.error('[qBittorrent Login]: No SID cookie returned.');
-          return false;
+          // Auth bypassed on localhost; no cookie required
+          this.cookie = null;
+          console.log('[qBittorrent Login]: Auth bypassed by qBittorrent server (no cookie required).');
         }
+        return true;
       } else {
         if (text.includes("banned") || res.status === 403) {
           this.lastError = `qBittorrent IP Ban: Your IP address has been temporarily banned by qBittorrent due to previous invalid password attempts. Please restart your qBittorrent container ('docker restart qbittorrent') and try again.`;
@@ -76,6 +76,24 @@ export class QBittorrentClient {
   }
 
   async testConnection() {
+    try {
+      // 1. First try direct version check (works when 'Bypass authentication for clients on localhost' is checked)
+      const originUrl = `http://${this.host}:${this.port}`;
+      const directRes = await fetch(`${this.baseUrl}/app/version`, {
+        headers: {
+          "Referer": originUrl,
+          "Origin": originUrl,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+      });
+
+      if (directRes.ok) {
+        const ver = await directRes.text();
+        return { success: true, version: `${ver.trim()} (Localhost Auth Bypassed)` };
+      }
+    } catch (e) {}
+
+    // 2. Fallback: Authenticate with credentials
     const success = await this.login();
     if (!success) {
       return { success: false, error: this.lastError || "Authentication failed" };
@@ -90,17 +108,9 @@ export class QBittorrentClient {
     }
   }
 
-  async request(endpoint, paramsObj = {}, options = {}, isRetry = false) {
-    const formParams = new URLSearchParams();
-    for (const [k, v] of Object.entries(paramsObj)) {
-      if (v !== undefined && v !== null) {
-        formParams.append(k, v);
-      }
-    }
-
+  async request(endpoint, bodyData = {}, options = {}, isRetry = false) {
     const originUrl = `http://${this.host}:${this.port}`;
     const headers = {
-      "Content-Type": "application/x-www-form-urlencoded",
       "Referer": originUrl,
       "Origin": originUrl,
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -110,10 +120,25 @@ export class QBittorrentClient {
       headers["Cookie"] = this.cookie;
     }
 
+    let reqBody;
+    if (bodyData instanceof FormData) {
+      reqBody = bodyData;
+      // Do not set Content-Type header manually for FormData (fetch sets multipart/form-data boundary automatically)
+    } else {
+      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      const formParams = new URLSearchParams();
+      for (const [k, v] of Object.entries(bodyData)) {
+        if (v !== undefined && v !== null) {
+          formParams.append(k, v);
+        }
+      }
+      reqBody = formParams.toString();
+    }
+
     const res = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "POST",
       headers,
-      body: formParams.toString(),
+      body: reqBody,
       ...options
     });
 
@@ -124,7 +149,7 @@ export class QBittorrentClient {
       console.log(`[qBittorrent]: ${endpoint} returned ${res.status}. Attempting login...`);
       const loggedIn = await this.login();
       if (loggedIn && this.cookie) {
-        return this.request(endpoint, paramsObj, options, true);
+        return this.request(endpoint, bodyData, options, true);
       } else {
         const resText = await res.text();
         throw new Error(`qBittorrent API ${endpoint} failed (HTTP ${res.status}): ${resText || 'Forbidden'}`);
@@ -137,13 +162,16 @@ export class QBittorrentClient {
   // Batch add magnet/torrent URLs to target save path
   async addTorrents({ urls, savePath, category = "yyStreaming" }) {
     const urlList = Array.isArray(urls) ? urls.join("\n") : urls;
-    console.log(`[qBittorrent API]: Adding torrent(s) to savePath: '${savePath}'`);
-    const res = await this.request('/torrents/add', {
-      urls: urlList,
-      savepath: savePath,
-      category: category,
-      autoTMM: 'false'
-    });
+    console.log(`[qBittorrent API]: Adding torrent(s) via FormData to savePath: '${savePath}'`);
+    
+    // qBittorrent /torrents/add requires multipart/form-data
+    const formData = new FormData();
+    formData.append("urls", urlList);
+    formData.append("savepath", savePath);
+    formData.append("category", category);
+    formData.append("autoTMM", "false");
+
+    const res = await this.request('/torrents/add', formData);
     const text = await res.text();
     console.log(`[qBittorrent API]: /torrents/add result: Status ${res.status}, Body: '${text}'`);
     return res.ok;
