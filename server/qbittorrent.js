@@ -54,12 +54,12 @@ export class QBittorrentClient {
         if (sid) {
           this.cookie = `SID=${sid}`;
           console.log('[qBittorrent Login]: Successfully authenticated with SID cookie.');
+          return true;
         } else {
-          // Auth bypassed on localhost; no cookie required
-          this.cookie = null;
-          console.log('[qBittorrent Login]: Auth bypassed by qBittorrent server (no cookie required).');
+          this.lastError = `Authentication failed: qBittorrent rejected credentials (no SID cookie returned). Default Docker username is usually 'admin'.`;
+          console.error('[qBittorrent Login]: No SID cookie returned.');
+          return false;
         }
-        return true;
       } else {
         if (text.includes("banned") || res.status === 403) {
           this.lastError = `qBittorrent IP Ban: Your IP address has been temporarily banned by qBittorrent due to previous invalid password attempts. Please restart your qBittorrent container ('docker restart qbittorrent') and try again.`;
@@ -76,24 +76,7 @@ export class QBittorrentClient {
   }
 
   async testConnection() {
-    try {
-      // 1. First try direct version check (works when 'Bypass authentication for clients on localhost' is checked)
-      const originUrl = `http://${this.host}:${this.port}`;
-      const directRes = await fetch(`${this.baseUrl}/app/version`, {
-        headers: {
-          "Referer": originUrl,
-          "Origin": originUrl,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
-      });
-
-      if (directRes.ok) {
-        const ver = await directRes.text();
-        return { success: true, version: `${ver.trim()} (Localhost Auth Bypassed)` };
-      }
-    } catch (e) {}
-
-    // 2. Fallback: Authenticate with credentials
+    // Authenticate and verify SID cookie issuance
     const success = await this.login();
     if (!success) {
       return { success: false, error: this.lastError || "Authentication failed" };
@@ -102,7 +85,7 @@ export class QBittorrentClient {
     try {
       const verRes = await this.request('/app/version');
       const version = verRes.ok ? await verRes.text() : 'Connected';
-      return { success: true, version: version.trim() };
+      return { success: true, version: `${version.trim()} (Authenticated)` };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -123,7 +106,6 @@ export class QBittorrentClient {
     let reqBody;
     if (bodyData instanceof FormData) {
       reqBody = bodyData;
-      // Do not set Content-Type header manually for FormData (fetch sets multipart/form-data boundary automatically)
     } else {
       headers["Content-Type"] = "application/x-www-form-urlencoded";
       const formParams = new URLSearchParams();
@@ -151,8 +133,7 @@ export class QBittorrentClient {
       if (loggedIn && this.cookie) {
         return this.request(endpoint, bodyData, options, true);
       } else {
-        const resText = await res.text();
-        throw new Error(`qBittorrent API ${endpoint} failed (HTTP ${res.status}): ${resText || 'Forbidden'}`);
+        throw new Error(`qBittorrent API ${endpoint} failed (HTTP ${res.status}): Forbidden. Please check your qBittorrent Username (default: 'admin') and Password in Settings.`);
       }
     }
 
