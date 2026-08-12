@@ -348,6 +348,10 @@ app.get('/api/settings', (req, res) => {
   res.json({
     videoDir: settings.videoDir,
     port: settings.port,
+    qbHost: settings.qbHost || '127.0.0.1',
+    qbPort: settings.qbPort || 8080,
+    qbUsername: settings.qbUsername || 'admin',
+    qbPassword: settings.qbPassword || '',
     localIps: getLocalIps(),
     ffmpegAvailable: checkFfmpeg()
   });
