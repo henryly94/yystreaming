@@ -35,7 +35,8 @@ export class QBittorrentClient {
       const text = await res.text();
       console.log(`[qBittorrent Login Debug]: HTTP ${res.status}, Response: '${text}'`);
 
-      if (res.ok && (text.includes("Ok.") || text.includes("Ok"))) {
+      // qBittorrent returns 200 OK ("Ok.") or 204 No Content on successful auth
+      if (res.ok && !text.includes("Fails") && res.status !== 403) {
         let sid = null;
         if (typeof res.headers.getSetCookie === 'function') {
           const cookieList = res.headers.getSetCookie();
@@ -52,14 +53,15 @@ export class QBittorrentClient {
 
         if (sid) {
           this.cookie = `SID=${sid}`;
-          console.log('[qBittorrent Login]: Successfully authenticated!');
-          return true;
         } else {
-          this.lastError = `Login response was Ok, but no SID cookie was returned. Text: ${text}`;
+          // If HTTP 200/204 is returned without a SID cookie (e.g., auth bypass), mark session active
+          this.cookie = "auth_bypass=1";
         }
+        console.log('[qBittorrent Login]: Successfully authenticated!');
+        return true;
       } else {
         if (text.includes("banned") || res.status === 403) {
-          this.lastError = `qBittorrent IP Ban: Your IP address (127.0.0.1) has been temporarily banned by qBittorrent due to previous invalid password attempts. Please restart qBittorrent on your Pi (e.g., 'sudo systemctl restart qbittorrent-nox'), check your username/password in Settings, and try again.`;
+          this.lastError = `qBittorrent IP Ban: Your IP address has been temporarily banned by qBittorrent due to previous invalid password attempts. Please restart your qBittorrent container ('docker restart qbittorrent') and try again.`;
         } else {
           this.lastError = `Authentication failed (HTTP ${res.status}): ${text || 'Invalid username or password'}`;
         }
