@@ -35,7 +35,7 @@ export class QBittorrentClient {
       const text = await res.text();
       console.log(`[qBittorrent Login Debug]: HTTP ${res.status}, Response: '${text}'`);
 
-      // qBittorrent returns 200 OK ("Ok.") or 204 No Content on successful auth
+      // qBittorrent returns 200 OK ("Ok.") with Set-Cookie: SID=... on valid authentication
       if (res.ok && !text.includes("Fails") && res.status !== 403) {
         let sid = null;
         if (typeof res.headers.getSetCookie === 'function') {
@@ -53,13 +53,13 @@ export class QBittorrentClient {
 
         if (sid) {
           this.cookie = `SID=${sid}`;
-          console.log('[qBittorrent Login]: Authenticated with SID cookie.');
+          console.log('[qBittorrent Login]: Successfully authenticated with SID cookie.');
+          return true;
         } else {
-          // Auth bypassed on localhost; no cookie needed
-          this.cookie = null;
-          console.log('[qBittorrent Login]: Auth bypassed by qBittorrent server.');
+          this.lastError = `Invalid username or password (qBittorrent did not issue a SID cookie).`;
+          console.error('[qBittorrent Login]: No SID cookie returned.');
+          return false;
         }
-        return true;
       } else {
         if (text.includes("banned") || res.status === 403) {
           this.lastError = `qBittorrent IP Ban: Your IP address has been temporarily banned by qBittorrent due to previous invalid password attempts. Please restart your qBittorrent container ('docker restart qbittorrent') and try again.`;
@@ -76,24 +76,6 @@ export class QBittorrentClient {
   }
 
   async testConnection() {
-    try {
-      // 1. First try unauthenticated request (works instantly if 'Bypass authentication for clients on localhost' is enabled)
-      const originUrl = `http://${this.host}:${this.port}`;
-      const directRes = await fetch(`${this.baseUrl}/app/version`, {
-        headers: {
-          "Referer": originUrl,
-          "Origin": originUrl,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
-      });
-
-      if (directRes.ok) {
-        const ver = await directRes.text();
-        return { success: true, version: `${ver.trim()} (Localhost Auth Bypassed)` };
-      }
-    } catch (e) {}
-
-    // 2. Fallback: Login with credentials
     const success = await this.login();
     if (!success) {
       return { success: false, error: this.lastError || "Authentication failed" };
@@ -101,10 +83,10 @@ export class QBittorrentClient {
 
     try {
       const verRes = await this.request('/app/version');
-      const version = verRes.ok ? await verRes.text() : 'Unknown';
+      const version = verRes.ok ? await verRes.text() : 'Connected';
       return { success: true, version: version.trim() };
     } catch (err) {
-      return { success: true, version: 'Connected' };
+      return { success: false, error: err.message };
     }
   }
 
