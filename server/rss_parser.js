@@ -1,75 +1,87 @@
-// Helper to convert Chinese/Roman season indicators to clean "Season X"
+// Helper to clean anime show title from Mikan RSS title
 export function cleanShowName(rawTitle) {
   if (!rawTitle) return "Anime Show";
-
-  // Strip initial subgroup tag like [LoliHouse] or [Nix-Raws]
-  let title = rawTitle.replace(/^\[[^\]]+\]\s*/, "");
-
-  // Extract primary name before episode delimiter or bracket
-  const nameParts = title.split(/[-¨C¡ª]|\[|\(|S\d+E\d+/)[0].trim();
-  const subNames = nameParts.split("/").map(n => n.trim()).filter(Boolean);
   
-  // Prefer English or clean Chinese name
-  let mainName = subNames[0] || nameParts;
-  if (subNames.length > 1) {
-    const enName = subNames.find(n => /^[A-Za-z0-9\s:]+$/.test(n));
-    if (enName) mainName = enName;
+  // Remove common fansub tags in brackets at start e.g. ã€æžå½±å­—å¹•Â·æ¯ç‰‡å…šã€‘, [Sakurato], [KTXP]
+  let cleaned = rawTitle.replace(/^(?:ã€[^ã€‘]+ã€‘|\[[^\]]+\]|\([^)]+\))\s*/g, '');
+  
+  // Remove resolution and codec tags at end e.g. GB_CN AV1_opus 1080p, [1080p], [HEVC-10bit]
+  cleaned = cleaned.replace(/\s*(?:\[|\(|ã€)?(?:1080p|720p|2160p|4k|HEVC|AVC|H264|H265|AV1|AAC|MP4|MKV|ASS|CHS|CHT|GB_CN|BIG5|WebRip|Bilibili).*/i, '');
+  
+  // Remove episode numbers at end e.g. ç¬¬06é›†, - 06, S3E06
+  cleaned = cleaned.replace(/\s*(?:S\d+)?(?:E|EP|ç¬¬)?\s*\d{1,4}(?:\.5)?\s*(?:[é›†è©±è¯])?$/i, '');
+  cleaned = cleaned.replace(/\s*-\s*\d{1,3}.*$/i, '');
+  
+  return cleaned.trim() || rawTitle;
+}
+
+// Extract exact episode number from Mikan RSS item title
+export function parseRssItem(item) {
+  const rawTitle = item.title || "";
+
+  // Check special episode flags
+  const isSpecial = /SP|OVA|OAD|Movie|å‰§åœºç‰ˆ|åŠ‡å ´ç‰ˆ/i.test(rawTitle);
+  const spM = rawTitle.match(/SP\s*(\d{1,2})/i);
+  const ovaM = rawTitle.match(/OVA\s*(\d{1,2})/i);
+
+  let episodeNum = null;
+
+  // 1. Check explicit Chinese episode pattern (highest priority): ç¬¬06é›† / ç¬¬6è©± / ç¬¬06è¯
+  const cnMatch = rawTitle.match(/ç¬¬\s*(\d{1,4}(?:\.5)?)\s*(?:v\d+)?\s*[é›†è©±è¯]/i);
+  if (cnMatch) {
+    episodeNum = cnMatch[1].padStart(2, "0");
   }
 
-  // Detect Season number
-  let seasonStr = "";
-  const seasonMatch = rawTitle.match(/(?:Season\s*|S|µÚ)(\d+|[I|V|X]+|Ò»|¶þ|Èý|ËÄ|Îå|Áù|Æß|°Ë|¾Å|Ê®)(?:¼¾)?/i);
-  if (seasonMatch) {
-    let sVal = seasonMatch[1].toUpperCase();
-    if (sVal === "II" || sVal === "¢ò" || sVal === "2" || sVal === "¶þ") sVal = "2";
-    else if (sVal === "III" || sVal === "¢ó" || sVal === "3" || sVal === "Èý") sVal = "3";
-    else if (sVal === "IV" || sVal === "¢ô" || sVal === "4" || sVal === "ËÄ") sVal = "4";
-    else if (sVal === "I" || sVal === "¢ñ" || sVal === "1" || sVal === "Ò»") sVal = "1";
-    
-    if (/^\d+$/.test(sVal) && parseInt(sVal, 10) > 1) {
-      seasonStr = ` Season ${sVal}`;
+  // 2. Check explicit S03E06 / E06 / EP06 pattern
+  if (!episodeNum) {
+    const epMatch = rawTitle.match(/(?:S\d+\s*)?E(?:P)?\s*(\d{1,4}(?:\.5)?)\b/i);
+    if (epMatch) {
+      episodeNum = epMatch[1].padStart(2, "0");
     }
   }
 
-  // Clean title text from Roman numerals and season words
-  mainName = mainName
-    .replace(/(?:II|¢ò|III|¢ó|IV|¢ô|S\d+|µÚ¶þ¼¾|µÚÈý¼¾|µÚËÄ¼¾|µÚ\d+¼¾)$/i, "")
-    .trim();
-
-  return `${mainName}${seasonStr}`.trim();
-}
-
-// Parse episode number and format properties from raw torrent title
-export function parseRssItem(item) {
-  const rawTitle = item.title || "";
-  
-  // 1. Detect Episode Number
-  let episodeNum = "01";
-  let isSpecial = false;
-
-  const epMatch = rawTitle.match(/(?:-\s*|S\d+E|E|\[)(\d{1,3}(?:\.5)?)(?:\]|\s+v\d+|\s*\[|\s+|$)/i) 
-               || rawTitle.match(/(?:µÚ)(\d{1,3})(?:»°|Ô’|¼¯)/);
-
-  if (epMatch) {
-    episodeNum = epMatch[1].padStart(2, "0");
-  } else if (/SP\d+/i.test(rawTitle)) {
-    const spM = rawTitle.match(/SP(\d+)/i);
-    episodeNum = spM ? `SP${spM[1].padStart(2, "0")}` : "SP";
-    isSpecial = true;
-  } else if (/OVA\d+/i.test(rawTitle)) {
-    const ovaM = rawTitle.match(/OVA(\d+)/i);
-    episodeNum = ovaM ? `OVA${ovaM[1].padStart(2, "0")}` : "OVA";
-    isSpecial = true;
+  // 3. Check bracketed episode pattern: [06] or ã€06ã€‘ (excluding resolution/codec numbers like 1080, 720, 2160)
+  if (!episodeNum) {
+    const bracketMatches = [...rawTitle.matchAll(/(?:\[|ã€)\s*(\d{1,3}(?:\.5)?)(?:v\d+)?\s*(?:\]|ã€‘)/g)];
+    for (const match of bracketMatches) {
+      const num = parseInt(match[1], 10);
+      if (num !== 1080 && num !== 720 && num !== 2160 && num !== 4 && num !== 264 && num !== 265) {
+        episodeNum = match[1].padStart(2, "0");
+        break;
+      }
+    }
   }
 
-  // 2. Check if file is H.264 / AVC 8-bit (qualifies for 2-second Fast Remux)
-  const isH264 = /AVC|H264|H\.264|x264|Baha|CR|CATCHPLAY|MP4/i.test(rawTitle) 
-              && !/HEVC|H265|H\.265|10bit|10-bit/i.test(rawTitle);
+  // 4. Check hyphenated pattern: - 06 or - 6
+  if (!episodeNum) {
+    const hyphenMatch = rawTitle.match(/(?:-\s*|\s+)(\d{1,3}(?:\.5)?)(?:\s*v\d+)?(?:\s+\[|\s+|$)/i);
+    if (hyphenMatch) {
+      const num = parseInt(hyphenMatch[1], 10);
+      if (num !== 1080 && num !== 720 && num !== 2160) {
+        episodeNum = hyphenMatch[1].padStart(2, "0");
+      }
+    }
+  }
 
-  // 3. Resolution check
-  const is1080p = /1080|1920x1080/i.test(rawTitle);
+  // 5. Fallback for Specials / OVA or unknown
+  if (!episodeNum) {
+    if (spM) episodeNum = `SP${spM[1].padStart(2, "0")}`;
+    else if (ovaM) episodeNum = `OVA${ovaM[1].padStart(2, "0")}`;
+    else if (isSpecial) episodeNum = "SP";
+    else {
+      // Fallback: use hash of title so items are not merged together
+      const simpleHash = Math.abs(rawTitle.split("").reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0)).toString(36).slice(0, 4);
+      episodeNum = `EP_${simpleHash}`;
+    }
+  }
 
-  // 4. Extract torrent / magnet link
+  // Quality & Format indicators
+  const is1080p = /1080p|1920x1080/i.test(rawTitle);
+  const is720p = /720p|1280x720/i.test(rawTitle);
+  const isH264 = /H\.?264|AVC/i.test(rawTitle);
+  const isHEVC = /H\.?265|HEVC|AV1/i.test(rawTitle);
+
+  // Extract download URL
   let downloadUrl = "";
   if (item.enclosure && item.enclosure.url) {
     downloadUrl = item.enclosure.url;
@@ -80,51 +92,43 @@ export function parseRssItem(item) {
   return {
     rawTitle,
     episodeNum,
-    isSpecial,
-    isH264,
-    is1080p,
-    pubDate: item.pubDate ? new Date(item.pubDate).getTime() : 0,
     downloadUrl,
+    pubDate: item.pubDate ? new Date(item.pubDate).getTime() : 0,
+    is1080p,
+    is720p,
+    isH264,
+    isHEVC,
     cleanEpisodeName: isSpecial ? episodeNum : `Episode ${episodeNum}`
   };
 }
 
-// Group items by episode number and prioritize H.264 / AVC fast-remux releases
+// Deduplicate items so each episode number is included
 export function deduplicateAndFilterRssItems(rawItems) {
   const parsedList = rawItems.map(item => parseRssItem(item));
-  const groups = new Map();
-
+  
+  // Group by episodeNum
+  const grouped = new Map();
   for (const item of parsedList) {
-    if (!item.downloadUrl) continue;
     const key = item.episodeNum;
-    if (!groups.has(key)) {
-      groups.set(key, []);
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
     }
-    groups.get(key).push(item);
+    grouped.get(key).push(item);
   }
 
   const selectedList = [];
-
-  for (const [epNum, items] of groups.entries()) {
-    // Sort releases for this episode:
-    // 1. H.264/AVC 8-bit fast-remux releases first
-    // 2. 1080p resolution second
-    // 3. Newest publication date third
+  for (const [epNum, items] of grouped.entries()) {
+    // Pick the best quality item for each episode number
     items.sort((a, b) => {
-      if (a.isH264 !== b.isH264) return a.isH264 ? -1 : 1;
       if (a.is1080p !== b.is1080p) return a.is1080p ? -1 : 1;
+      if (a.isHEVC !== b.isHEVC) return a.isHEVC ? -1 : 1;
       return b.pubDate - a.pubDate;
     });
-
-    // Top choice is recommended
-    const bestChoice = items[0];
-    selectedList.push({
-      ...bestChoice,
-      allReleasesCount: items.length
-    });
+    selectedList.push(items[0]);
   }
 
-  // Sort by episode number ascending
+  // Sort episodes in ascending numerical order
   selectedList.sort((a, b) => a.episodeNum.localeCompare(b.episodeNum, undefined, { numeric: true }));
+
   return selectedList;
 }
