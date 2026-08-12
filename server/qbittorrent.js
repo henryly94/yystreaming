@@ -3,7 +3,7 @@ import path from "path";
 // Authenticated qBittorrent Web API helper
 export class QBittorrentClient {
   constructor(config = {}) {
-    this.host = config.qbHost || "localhost";
+    this.host = config.qbHost || "127.0.0.1";
     this.port = config.qbPort || 8080;
     this.username = config.qbUsername || "admin";
     this.password = config.qbPassword || "adminadmin";
@@ -26,7 +26,8 @@ export class QBittorrentClient {
         headers: { 
           "Content-Type": "application/x-www-form-urlencoded",
           "Referer": originUrl,
-          "Origin": originUrl
+          "Origin": originUrl,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         },
         body: params.toString()
       });

@@ -28,7 +28,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   currentSettings
 }) => {
   const [videoDir, setVideoDir] = useState('');
-  const [qbHost, setQbHost] = useState('localhost');
+  const [qbHost, setQbHost] = useState('127.0.0.1');
   const [qbPort, setQbPort] = useState(8080);
   const [qbUsername, setQbUsername] = useState('admin');
   const [qbPassword, setQbPassword] = useState('adminadmin');
