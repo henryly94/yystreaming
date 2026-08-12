@@ -1038,11 +1038,14 @@ app.post('/api/rss/subscribe', async (req, res) => {
       return res.status(400).json({ error: 'Library directory is not configured in settings.' });
     }
 
-    // 1. Create clean target show directory inside videoDir
+    // 1. Create clean target show directory inside videoDir with full permissions for Docker/qBittorrent
     const targetShowDir = path.join(settings.videoDir, showName);
     if (!fs.existsSync(targetShowDir)) {
-      fs.mkdirSync(targetShowDir, { recursive: true });
+      fs.mkdirSync(targetShowDir, { recursive: true, mode: 0o777 });
     }
+    try {
+      fs.chmodSync(targetShowDir, 0o777);
+    } catch (e) {}
 
     // Automatically fetch official Mikan cover art thumbnail to target directory
     fetchMikanCoverImage(rssUrl, targetShowDir).catch(err => {
