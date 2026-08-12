@@ -17,21 +17,39 @@ export class QBittorrentClient {
       params.append("username", this.username);
       params.append("password", this.password);
 
+      const originUrl = `http://${this.host}:${this.port}`;
       const res = await fetch(`${this.baseUrl}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { 
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Referer": originUrl,
+          "Origin": originUrl
+        },
         body: params.toString()
       });
 
       const text = await res.text();
-      if (res.ok && text.includes("Ok")) {
-        const rawCookies = res.headers.get("set-cookie");
-        if (rawCookies) {
-          const match = rawCookies.match(/SID=([^;]+)/);
-          if (match) {
-            this.cookie = `SID=${match[1]}`;
-            return true;
+      console.log(`[qBittorrent Login Debug]: HTTP ${res.status}, Response: '${text}'`);
+
+      if (res.ok && (text.includes("Ok.") || text.includes("Ok"))) {
+        let sid = null;
+        if (typeof res.headers.getSetCookie === 'function') {
+          const cookieList = res.headers.getSetCookie();
+          for (const c of cookieList) {
+            const match = c.match(/SID=([^;]+)/);
+            if (match) sid = match[1];
           }
+        }
+        if (!sid) {
+          const rawCookies = res.headers.get("set-cookie") || "";
+          const match = rawCookies.match(/SID=([^;]+)/);
+          if (match) sid = match[1];
+        }
+
+        if (sid) {
+          this.cookie = `SID=${sid}`;
+          console.log('[qBittorrent Login]: Successfully authenticated!');
+          return true;
         }
       }
       return false;
@@ -56,10 +74,13 @@ export class QBittorrentClient {
       }
     }
 
+    const originUrl = `http://${this.host}:${this.port}`;
     const res = await fetch(`${this.baseUrl}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": originUrl,
+        "Origin": originUrl,
         "Cookie": this.cookie || ""
       },
       body: formParams.toString(),

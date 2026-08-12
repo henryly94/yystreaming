@@ -355,7 +355,7 @@ app.get('/api/settings', (req, res) => {
 
 // Update settings
 app.post('/api/settings', (req, res) => {
-  const { videoDir } = req.body;
+  const { videoDir, qbHost, qbPort, qbUsername, qbPassword } = req.body;
   if (!videoDir) {
     return res.status(400).json({ error: 'videoDir is required' });
   }
@@ -374,12 +374,20 @@ app.post('/api/settings', (req, res) => {
 
   const settings = getSettings();
   settings.videoDir = resolvedPath;
+  if (qbHost !== undefined) settings.qbHost = qbHost;
+  if (qbPort !== undefined) settings.qbPort = parseInt(qbPort, 10) || 8080;
+  if (qbUsername !== undefined) settings.qbUsername = qbUsername;
+  if (qbPassword !== undefined) settings.qbPassword = qbPassword;
+
   saveSettings(settings);
 
   res.json({
     success: true,
     videoDir: settings.videoDir,
     port: settings.port,
+    qbHost: settings.qbHost,
+    qbPort: settings.qbPort,
+    qbUsername: settings.qbUsername,
     localIps: getLocalIps(),
     ffmpegAvailable: checkFfmpeg()
   });
