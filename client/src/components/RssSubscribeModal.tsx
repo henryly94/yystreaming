@@ -63,7 +63,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     }
   };
 
-  const handleSubscribe = async () => {
+  const handleSubscribe = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!showName.trim() || episodes.length === 0) return;
 
     setSubmitting(true);
@@ -169,7 +170,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
               </div>
             </form>
           ) : (
-            <div>
+            <form onSubmit={handleSubscribe}>
               <div className="form-group">
                 <label className="form-label">Clean Show Folder Name</label>
                 <input
@@ -231,7 +232,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 <button type="button" className="btn btn-secondary" onClick={() => setStep("input")}>
                   Back
                 </button>
-                <button type="button" className="btn btn-primary" onClick={handleSubscribe} disabled={submitting}>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
                   {submitting ? (
                     <>
                       <RefreshCw size={14} className="spin" /> Subscribing & Syncing...
@@ -243,7 +244,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                   )}
                 </button>
               </div>
-            </div>
+            </form>
           )}
         </div>
       </div>

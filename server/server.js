@@ -1065,6 +1065,15 @@ app.post('/api/rss/subscribe', async (req, res) => {
   }
 });
 
+// Explicit GET handlers to provide clear JSON feedback instead of default Express 404
+app.get('/api/rss/subscribe', (req, res) => {
+  return res.status(405).json({ error: 'Method Not Allowed. Please send a POST request with rssUrl, showName, and selectedEpisodes parameters.' });
+});
+
+app.get('/api/rss/preview', (req, res) => {
+  return res.status(405).json({ error: 'Method Not Allowed. Please send a POST request with rssUrl parameter.' });
+});
+
 // Serve built static frontend bundle in production mode if client/dist exists
 const clientDistPath = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDistPath)) {
