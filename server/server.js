@@ -882,6 +882,47 @@ app.post('/api/library/optimize/resume', (req, res) => {
   }
 });
 
+// Fetch official anime cover/poster thumbnail from Mikan Project
+async function fetchMikanCoverImage(rssUrl, targetShowDir) {
+  try {
+    const bangumiMatch = rssUrl.match(/bangumiId=(\d+)/i);
+    if (!bangumiMatch) return false;
+
+    const bangumiId = bangumiMatch[1];
+    const pageUrl = `https://mikanani.me/Home/Bangumi/${bangumiId}`;
+
+    const res = await fetch(pageUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+
+    if (!res.ok) return false;
+    const html = await res.text();
+
+    const posterMatch = html.match(/\/images\/Bangumi\/[^\s'"]+\.(?:jpg|jpeg|png|webp)/i);
+    if (!posterMatch) return false;
+
+    let imageUrl = posterMatch[0];
+    if (imageUrl.startsWith('/')) {
+      imageUrl = `https://mikanani.me${imageUrl}`;
+    }
+
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) return false;
+
+    const buffer = Buffer.from(await imgRes.arrayBuffer());
+    const extMatch = imageUrl.match(/\.(jpg|jpeg|png|webp)/i);
+    const ext = extMatch ? extMatch[1].toLowerCase() : 'jpg';
+    const coverPath = path.join(targetShowDir, `cover.${ext}`);
+
+    fs.writeFileSync(coverPath, buffer);
+    console.log(`[Mikan-Cover]: Downloaded cover image to ${coverPath}`);
+    return true;
+  } catch (err) {
+    console.error('[Mikan-Cover]: Failed to fetch cover image:', err.message);
+    return false;
+  }
+}
+
 // Helper to parse XML RSS Feed text
 function parseXmlRssItems(xmlText) {
   const channelTitleMatch = xmlText.match(/<channel>[\s\S]*?<title>(.*?)<\/title>/i);
@@ -966,6 +1007,11 @@ app.post('/api/rss/subscribe', async (req, res) => {
     if (!fs.existsSync(targetShowDir)) {
       fs.mkdirSync(targetShowDir, { recursive: true });
     }
+
+    // Automatically fetch official Mikan cover art thumbnail to target directory
+    fetchMikanCoverImage(rssUrl, targetShowDir).catch(err => {
+      console.error('Non-blocking Mikan cover download failed:', err.message);
+    });
 
     // 2. Initialize qBittorrent Client
     const qb = new QBittorrentClient(settings);
