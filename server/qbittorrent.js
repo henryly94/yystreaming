@@ -151,6 +151,8 @@ export class QBittorrentClient {
     formData.append("savepath", savePath);
     formData.append("category", category);
     formData.append("autoTMM", "false");
+    formData.append("paused", "false");
+    formData.append("stopped", "false");
 
     const res = await this.request('/torrents/add', formData);
     const text = await res.text();
@@ -171,7 +173,10 @@ export class QBittorrentClient {
   }
 
   // Create RSS Downloader Auto-Rule
-  async setRssRule({ ruleName, savePath, feedPath, mustContain = "" }) {
+  async setRssRule({ ruleName, savePath, feedPath, feedUrl = "", mustContain = "" }) {
+    const affected = [feedPath];
+    if (feedUrl) affected.push(feedUrl);
+
     const ruleDef = {
       enabled: true,
       mustContain: mustContain,
@@ -180,7 +185,7 @@ export class QBittorrentClient {
       episodeFilter: "",
       smartFilter: false,
       previouslyMatchedEpisodes: [],
-      affectedFeeds: [feedPath],
+      affectedFeeds: affected,
       savePath: savePath,
       autoDeleteMode: 0,
       addPaused: false

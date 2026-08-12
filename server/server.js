@@ -1075,7 +1075,8 @@ app.post('/api/rss/subscribe', async (req, res) => {
     rssRuleAdded = await qb.setRssRule({
       ruleName: `${showName} Auto-Download`,
       savePath: targetShowDir,
-      feedPath: cleanFeedPath
+      feedPath: cleanFeedPath,
+      feedUrl: rssUrl
     });
 
     return res.json({
