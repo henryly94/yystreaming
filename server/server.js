@@ -5,6 +5,8 @@ import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { execSync, spawn } from 'child_process';
+import { cleanShowName, deduplicateAndFilterRssItems } from './rss_parser.js';
+import { QBittorrentClient } from './qbittorrent.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -877,6 +879,135 @@ app.post('/api/library/optimize/resume', (req, res) => {
   } catch (e) {
     console.error('Error resuming optimization:', e);
     return res.status(500).json({ error: 'Failed to resume optimization' });
+  }
+});
+
+// Helper to parse XML RSS Feed text
+function parseXmlRssItems(xmlText) {
+  const channelTitleMatch = xmlText.match(/<channel>[\s\S]*?<title>(.*?)<\/title>/i);
+  const rawChannelTitle = channelTitleMatch ? channelTitleMatch[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+
+  const items = [];
+  const itemMatches = xmlText.match(/<item>[\s\S]*?<\/item>/gi) || [];
+
+  for (const itemXml of itemMatches) {
+    const titleM = itemXml.match(/<title>(.*?)<\/title>/i);
+    const linkM = itemXml.match(/<link>(.*?)<\/link>/i);
+    const encM = itemXml.match(/<enclosure[^>]+url=["']([^"']+)["']/i);
+    const pubM = itemXml.match(/<pubDate>(.*?)<\/pubDate>/i);
+
+    const title = titleM ? titleM[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1').trim() : '';
+    const link = linkM ? linkM[1].trim() : '';
+    const enclosureUrl = encM ? encM[1].trim() : '';
+    const pubDate = pubM ? pubM[1].trim() : '';
+
+    items.push({
+      title,
+      link,
+      enclosure: enclosureUrl ? { url: enclosureUrl } : null,
+      pubDate
+    });
+  }
+
+  return { rawChannelTitle, items };
+}
+
+// Preview RSS Feed items and proposed clean folder/filenames
+app.post('/api/rss/preview', async (req, res) => {
+  const { rssUrl } = req.body;
+  if (!rssUrl) {
+    return res.status(400).json({ error: 'RSS URL is required' });
+  }
+
+  try {
+    const fetchRes = await fetch(rssUrl);
+    if (!fetchRes.ok) {
+      return res.status(400).json({ error: `Failed to fetch RSS feed (HTTP ${fetchRes.status})` });
+    }
+    const xmlText = await fetchRes.text();
+    const { rawChannelTitle, items } = parseXmlRssItems(xmlText);
+
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'No items found in the RSS feed' });
+    }
+
+    const proposedShowName = cleanShowName(rawChannelTitle || items[0].title);
+    const deduplicatedEpisodes = deduplicateAndFilterRssItems(items);
+
+    return res.json({
+      success: true,
+      rawChannelTitle,
+      proposedShowName,
+      totalRawItems: items.length,
+      episodesCount: deduplicatedEpisodes.length,
+      episodes: deduplicatedEpisodes
+    });
+  } catch (err) {
+    console.error('Error previewing RSS feed:', err);
+    return res.status(500).json({ error: 'Error parsing RSS feed: ' + err.message });
+  }
+});
+
+// Auto-subscribe anime RSS and batch download past episodes via qBittorrent
+app.post('/api/rss/subscribe', async (req, res) => {
+  const { rssUrl, showName, selectedEpisodes } = req.body;
+  if (!rssUrl || !showName || !selectedEpisodes || !Array.isArray(selectedEpisodes)) {
+    return res.status(400).json({ error: 'Invalid subscription request payload' });
+  }
+
+  try {
+    const settings = getSettings();
+    if (!settings.videoDir) {
+      return res.status(400).json({ error: 'Library directory is not configured in settings.' });
+    }
+
+    // 1. Create clean target show directory inside videoDir
+    const targetShowDir = path.join(settings.videoDir, showName);
+    if (!fs.existsSync(targetShowDir)) {
+      fs.mkdirSync(targetShowDir, { recursive: true });
+    }
+
+    // 2. Initialize qBittorrent Client
+    const qb = new QBittorrentClient(settings);
+    const downloadUrls = selectedEpisodes.map(ep => ep.downloadUrl).filter(Boolean);
+
+    let torrentsAdded = false;
+    let rssFeedAdded = false;
+    let rssRuleAdded = false;
+
+    if (downloadUrls.length > 0) {
+      torrentsAdded = await qb.addTorrents({
+        urls: downloadUrls,
+        savePath: targetShowDir,
+        category: 'yyStreaming'
+      });
+    }
+
+    // 3. Register RSS Feed and Rule in qBittorrent for future episodes
+    const cleanFeedPath = showName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    rssFeedAdded = await qb.addRssFeed({
+      url: rssUrl,
+      feedPath: cleanFeedPath
+    });
+
+    rssRuleAdded = await qb.setRssRule({
+      ruleName: `${showName} Auto-Download`,
+      savePath: targetShowDir,
+      feedPath: cleanFeedPath
+    });
+
+    return res.json({
+      success: true,
+      message: `Successfully subscribed to ${showName}!`,
+      targetShowDir,
+      episodesQueued: downloadUrls.length,
+      torrentsAdded,
+      rssFeedAdded,
+      rssRuleAdded
+    });
+  } catch (err) {
+    console.error('Error subscribing RSS feed:', err);
+    return res.status(500).json({ error: 'Subscription failed: ' + err.message });
   }
 });
 

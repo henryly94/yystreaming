@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { 
   Tv, Settings as SettingsIcon, Play, Pause, AlertCircle, 
   Search, ArrowLeft, CheckCircle2, CircleDot, RefreshCw,
-  ArrowUp
+  ArrowUp, Rss
 } from 'lucide-react';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SettingsModal } from './components/SettingsModal';
+import { RssSubscribeModal } from './components/RssSubscribeModal';
 
 interface Episode {
   id: string;
@@ -64,6 +65,7 @@ export default function App() {
   const [optimizeProgress, setOptimizeProgress] = useState<OptimizeProgress | null>(null);
   const [optimizeQueue, setOptimizeQueue] = useState<any[]>([]);
   const [isQueueExpanded, setIsQueueExpanded] = useState(false);
+  const [isRssModalOpen, setIsRssModalOpen] = useState(false);
 
   // Load progress states to force UI updates when progress changes
   const [_, setProgressTrigger] = useState(0);
@@ -258,12 +260,13 @@ export default function App() {
     return `${secs}s`;
   };
 
-  const handleSaveSettings = async (videoDir: string): Promise<boolean> => {
+  const handleSaveSettings = async (videoDir: string, qbConfig?: { qbHost: string; qbPort: number; qbUsername: string; qbPassword: string }): Promise<boolean> => {
     try {
+      const payload = { videoDir, ...qbConfig };
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoDir })
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         const data = await res.json();
@@ -383,7 +386,11 @@ export default function App() {
           </div>
         )}
 
-        <div className="nav-actions">
+        <div className="nav-actions" style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-primary" onClick={() => setIsRssModalOpen(true)}>
+            <Rss size={16} />
+            Import Anime RSS
+          </button>
           <button className="btn" onClick={() => setIsSettingsOpen(true)}>
             <SettingsIcon size={16} />
             Settings
@@ -953,6 +960,16 @@ export default function App() {
         onSave={handleSaveSettings}
         onRescan={handleRescan}
         currentSettings={settings}
+      />
+
+      {/* RSS Subscribe Modal */}
+      <RssSubscribeModal
+        isOpen={isRssModalOpen}
+        onClose={() => setIsRssModalOpen(false)}
+        onSuccess={(msg) => {
+          showToast(msg);
+          fetchLibrary();
+        }}
       />
 
       {/* Success/Toast Notification */}

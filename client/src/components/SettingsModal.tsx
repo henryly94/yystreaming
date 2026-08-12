@@ -6,12 +6,16 @@ interface Settings {
   videoDir: string;
   port: number;
   localIps: string[];
+  qbHost?: string;
+  qbPort?: number;
+  qbUsername?: string;
+  qbPassword?: string;
 }
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (videoDir: string) => Promise<boolean>;
+  onSave: (videoDir: string, qbConfig?: { qbHost: string; qbPort: number; qbUsername: string; qbPassword: string }) => Promise<boolean>;
   onRescan: () => Promise<void>;
   currentSettings: Settings | null;
 }
@@ -24,6 +28,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   currentSettings
 }) => {
   const [videoDir, setVideoDir] = useState('');
+  const [qbHost, setQbHost] = useState('localhost');
+  const [qbPort, setQbPort] = useState(8080);
+  const [qbUsername, setQbUsername] = useState('admin');
+  const [qbPassword, setQbPassword] = useState('adminadmin');
   const [isSaving, setIsSaving] = useState(false);
   const [isRescanning, setIsRescanning] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -106,7 +114,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    const success = await onSave(videoDir);
+    const success = await onSave(videoDir, { qbHost, qbPort, qbUsername, qbPassword });
     setIsSaving(false);
     if (success) {
       onClose();
@@ -158,6 +166,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               Provide the absolute path to the directory containing your video folders.
             </span>
+          </div>
+
+          <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '12px' }}>
+              qBittorrent Web UI Connection
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <label className="form-label">Host</label>
+                <input
+                  type="text"
+                  className="input-text"
+                  value={qbHost}
+                  onChange={(e) => setQbHost(e.target.value)}
+                  placeholder="localhost"
+                />
+              </div>
+              <div>
+                <label className="form-label">Port</label>
+                <input
+                  type="number"
+                  className="input-text"
+                  value={qbPort}
+                  onChange={(e) => setQbPort(parseInt(e.target.value, 10) || 8080)}
+                  placeholder="8080"
+                />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label className="form-label">Username</label>
+                <input
+                  type="text"
+                  className="input-text"
+                  value={qbUsername}
+                  onChange={(e) => setQbUsername(e.target.value)}
+                  placeholder="admin"
+                />
+              </div>
+              <div>
+                <label className="form-label">Password</label>
+                <input
+                  type="password"
+                  className="input-text"
+                  value={qbPassword}
+                  onChange={(e) => setQbPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '24px' }}>

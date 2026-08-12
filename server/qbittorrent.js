@@ -1,0 +1,122 @@
+import path from "path";
+
+// Authenticated qBittorrent Web API helper
+export class QBittorrentClient {
+  constructor(config = {}) {
+    this.host = config.qbHost || "localhost";
+    this.port = config.qbPort || 8080;
+    this.username = config.qbUsername || "admin";
+    this.password = config.qbPassword || "adminadmin";
+    this.baseUrl = `http://${this.host}:${this.port}/api/v2`;
+    this.cookie = null;
+  }
+
+  async login() {
+    try {
+      const params = new URLSearchParams();
+      params.append("username", this.username);
+      params.append("password", this.password);
+
+      const res = await fetch(`${this.baseUrl}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString()
+      });
+
+      const text = await res.text();
+      if (res.ok && text.includes("Ok")) {
+        const rawCookies = res.headers.get("set-cookie");
+        if (rawCookies) {
+          const match = rawCookies.match(/SID=([^;]+)/);
+          if (match) {
+            this.cookie = `SID=${match[1]}`;
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch (err) {
+      console.error("[qBittorrent]: Login request failed:", err.message);
+      return false;
+    }
+  }
+
+  async request(endpoint, paramsObj = {}, options = {}) {
+    if (!this.cookie) {
+      const loggedIn = await this.login();
+      if (!loggedIn) {
+        throw new Error("Failed to authenticate with qBittorrent Web UI");
+      }
+    }
+
+    const formParams = new URLSearchParams();
+    for (const [k, v] of Object.entries(paramsObj)) {
+      if (v !== undefined && v !== null) {
+        formParams.append(k, v);
+      }
+    }
+
+    const res = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": this.cookie || ""
+      },
+      body: formParams.toString(),
+      ...options
+    });
+
+    if (res.status === 403) {
+      // Re-authenticate if session expired
+      this.cookie = null;
+      await this.login();
+      return this.request(endpoint, paramsObj, options);
+    }
+
+    return res;
+  }
+
+  // Batch add magnet/torrent URLs to target save path
+  async addTorrents({ urls, savePath, category = "yyStreaming" }) {
+    const urlList = Array.isArray(urls) ? urls.join("\n") : urls;
+    const res = await this.request("/torrents/add", {
+      urls: urlList,
+      savepath: savePath,
+      category: category,
+      autoTMM: "false"
+    });
+    return res.ok;
+  }
+
+  // Add RSS Feed subscription URL
+  async addRssFeed({ url, feedPath }) {
+    const res = await this.request("/rss/addFeed", {
+      url: url,
+      path: feedPath
+    });
+    return res.ok;
+  }
+
+  // Create RSS Downloader Auto-Rule
+  async setRssRule({ ruleName, savePath, feedPath, mustContain = "" }) {
+    const ruleDef = {
+      enabled: true,
+      mustContain: mustContain,
+      mustNotContain: "",
+      useRegex: false,
+      episodeFilter: "",
+      smartFilter: false,
+      previouslyMatchedEpisodes: [],
+      affectedFeeds: [feedPath],
+      savePath: savePath,
+      autoDeleteMode: 0,
+      addPaused: false
+    };
+
+    const res = await this.request("/rss/setRule", {
+      ruleName: ruleName,
+      ruleDef: JSON.stringify(ruleDef)
+    });
+    return res.ok;
+  }
+}
