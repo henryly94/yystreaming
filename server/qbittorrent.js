@@ -53,11 +53,12 @@ export class QBittorrentClient {
 
         if (sid) {
           this.cookie = `SID=${sid}`;
+          console.log('[qBittorrent Login]: Authenticated with SID cookie.');
         } else {
-          // If HTTP 200/204 is returned without a SID cookie (e.g., auth bypass), mark session active
-          this.cookie = "auth_bypass=1";
+          // Auth bypassed on localhost; no cookie needed
+          this.cookie = null;
+          console.log('[qBittorrent Login]: Auth bypassed by qBittorrent server.');
         }
-        console.log('[qBittorrent Login]: Successfully authenticated!');
         return true;
       } else {
         if (text.includes("banned") || res.status === 403) {
@@ -127,53 +128,54 @@ export class QBittorrentClient {
       headers["Cookie"] = this.cookie;
     }
 
-    try {
-      const res = await fetch(`${this.baseUrl}${endpoint}`, {
-        method: "POST",
-        headers,
-        body: formParams.toString(),
-        ...options
-      });
+    const res = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: "POST",
+      headers,
+      body: formParams.toString(),
+      ...options
+    });
 
-      // If authentication is required or session expired (HTTP 403 / 401), perform login and retry once
-      if ((res.status === 403 || res.status === 401) && !isRetry) {
-        console.log('[qBittorrent]: Request received 403/401. Logging in with credentials...');
-        const loggedIn = await this.login();
-        if (!loggedIn) {
-          throw new Error(this.lastError || "Failed to authenticate with qBittorrent Web UI");
-        }
-        return this.request(endpoint, paramsObj, options, true);
-      }
+    console.log(`[qBittorrent API Debug]: Endpoint ${endpoint} -> Status ${res.status}`);
 
-      return res;
-    } catch (err) {
-      if (isRetry) throw err;
+    // If forbidden/unauthorized and we haven't retried yet:
+    if ((res.status === 403 || res.status === 401) && !isRetry) {
+      console.log(`[qBittorrent]: ${endpoint} returned ${res.status}. Attempting login...`);
       const loggedIn = await this.login();
-      if (!loggedIn) {
-        throw new Error(this.lastError || err.message);
+      if (loggedIn && this.cookie) {
+        return this.request(endpoint, paramsObj, options, true);
+      } else {
+        const resText = await res.text();
+        throw new Error(`qBittorrent API ${endpoint} failed (HTTP ${res.status}): ${resText || 'Forbidden'}`);
       }
-      return this.request(endpoint, paramsObj, options, true);
     }
+
+    return res;
   }
 
   // Batch add magnet/torrent URLs to target save path
   async addTorrents({ urls, savePath, category = "yyStreaming" }) {
     const urlList = Array.isArray(urls) ? urls.join("\n") : urls;
-    const res = await this.request("/torrents/add", {
+    console.log(`[qBittorrent API]: Adding torrent(s) to savePath: '${savePath}'`);
+    const res = await this.request('/torrents/add', {
       urls: urlList,
       savepath: savePath,
       category: category,
-      autoTMM: "false"
+      autoTMM: 'false'
     });
+    const text = await res.text();
+    console.log(`[qBittorrent API]: /torrents/add result: Status ${res.status}, Body: '${text}'`);
     return res.ok;
   }
 
   // Add RSS Feed subscription URL
   async addRssFeed({ url, feedPath }) {
-    const res = await this.request("/rss/addFeed", {
+    console.log(`[qBittorrent API]: Adding RSS Feed '${url}' with path '${feedPath}'`);
+    const res = await this.request('/rss/addFeed', {
       url: url,
       path: feedPath
     });
+    const text = await res.text();
+    console.log(`[qBittorrent API]: /rss/addFeed result: Status ${res.status}, Body: '${text}'`);
     return res.ok;
   }
 
@@ -193,10 +195,13 @@ export class QBittorrentClient {
       addPaused: false
     };
 
-    const res = await this.request("/rss/setRule", {
+    console.log(`[qBittorrent API]: Setting RSS Rule '${ruleName}' for path '${feedPath}' -> '${savePath}'`);
+    const res = await this.request('/rss/setRule', {
       ruleName: ruleName,
       ruleDef: JSON.stringify(ruleDef)
     });
+    const text = await res.text();
+    console.log(`[qBittorrent API]: /rss/setRule result: Status ${res.status}, Body: '${text}'`);
     return res.ok;
   }
 }
