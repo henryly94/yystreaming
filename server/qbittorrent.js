@@ -75,6 +75,24 @@ export class QBittorrentClient {
   }
 
   async testConnection() {
+    try {
+      // 1. First try unauthenticated request (works instantly if 'Bypass authentication for clients on localhost' is enabled)
+      const originUrl = `http://${this.host}:${this.port}`;
+      const directRes = await fetch(`${this.baseUrl}/app/version`, {
+        headers: {
+          "Referer": originUrl,
+          "Origin": originUrl,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+      });
+
+      if (directRes.ok) {
+        const ver = await directRes.text();
+        return { success: true, version: `${ver.trim()} (Localhost Auth Bypassed)` };
+      }
+    } catch (e) {}
+
+    // 2. Fallback: Login with credentials
     const success = await this.login();
     if (!success) {
       return { success: false, error: this.lastError || "Authentication failed" };
@@ -89,14 +107,7 @@ export class QBittorrentClient {
     }
   }
 
-  async request(endpoint, paramsObj = {}, options = {}) {
-    if (!this.cookie) {
-      const loggedIn = await this.login();
-      if (!loggedIn) {
-        throw new Error(this.lastError || "Failed to authenticate with qBittorrent Web UI");
-      }
-    }
-
+  async request(endpoint, paramsObj = {}, options = {}, isRetry = false) {
     const formParams = new URLSearchParams();
     for (const [k, v] of Object.entries(paramsObj)) {
       if (v !== undefined && v !== null) {
@@ -105,26 +116,44 @@ export class QBittorrentClient {
     }
 
     const originUrl = `http://${this.host}:${this.port}`;
-    const res = await fetch(`${this.baseUrl}${endpoint}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": originUrl,
-        "Origin": originUrl,
-        "Cookie": this.cookie || ""
-      },
-      body: formParams.toString(),
-      ...options
-    });
+    const headers = {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Referer": originUrl,
+      "Origin": originUrl,
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    };
 
-    if (res.status === 403) {
-      // Re-authenticate if session expired
-      this.cookie = null;
-      await this.login();
-      return this.request(endpoint, paramsObj, options);
+    if (this.cookie) {
+      headers["Cookie"] = this.cookie;
     }
 
-    return res;
+    try {
+      const res = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: "POST",
+        headers,
+        body: formParams.toString(),
+        ...options
+      });
+
+      // If authentication is required or session expired (HTTP 403 / 401), perform login and retry once
+      if ((res.status === 403 || res.status === 401) && !isRetry) {
+        console.log('[qBittorrent]: Request received 403/401. Logging in with credentials...');
+        const loggedIn = await this.login();
+        if (!loggedIn) {
+          throw new Error(this.lastError || "Failed to authenticate with qBittorrent Web UI");
+        }
+        return this.request(endpoint, paramsObj, options, true);
+      }
+
+      return res;
+    } catch (err) {
+      if (isRetry) throw err;
+      const loggedIn = await this.login();
+      if (!loggedIn) {
+        throw new Error(this.lastError || err.message);
+      }
+      return this.request(endpoint, paramsObj, options, true);
+    }
   }
 
   // Batch add magnet/torrent URLs to target save path
