@@ -58,7 +58,11 @@ export class QBittorrentClient {
           this.lastError = `Login response was Ok, but no SID cookie was returned. Text: ${text}`;
         }
       } else {
-        this.lastError = `Authentication failed (HTTP ${res.status}): ${text || 'Invalid username or password'}`;
+        if (text.includes("banned") || res.status === 403) {
+          this.lastError = `qBittorrent IP Ban: Your IP address (127.0.0.1) has been temporarily banned by qBittorrent due to previous invalid password attempts. Please restart qBittorrent on your Pi (e.g., 'sudo systemctl restart qbittorrent-nox'), check your username/password in Settings, and try again.`;
+        } else {
+          this.lastError = `Authentication failed (HTTP ${res.status}): ${text || 'Invalid username or password'}`;
+        }
       }
       return false;
     } catch (err) {
