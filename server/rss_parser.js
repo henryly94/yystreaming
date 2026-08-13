@@ -40,15 +40,23 @@ export function parseRssItem(item) {
     }
   }
 
-  // 3. Check bracketed episode pattern: [06] or 【06】 (excluding resolution/codec numbers like 1080, 720, 2160)
+  // 3. Check bracketed episode pattern: [06] or 【06】 (excluding resolution/codec tags like 1080P, 720P, 2160P, 10bit)
   if (!episodeNum) {
     const bracketMatches = [...rawTitle.matchAll(/(?:\[|【)\s*(\d{1,3}(?:\.5)?)(?:v\d+)?\s*(?:\]|】)/g)];
     for (const match of bracketMatches) {
+      const fullMatchStr = match[0].toUpperCase();
       const num = parseInt(match[1], 10);
-      if (num !== 1080 && num !== 720 && num !== 2160 && num !== 4 && num !== 264 && num !== 265) {
-        episodeNum = match[1].padStart(2, "0");
-        break;
+      
+      // Skip if bracket contains P (1080P), K (4K), BIT (10BIT), or resolution numbers 1080, 720, 2160
+      if (fullMatchStr.includes("P") || fullMatchStr.includes("K") || fullMatchStr.includes("BIT")) {
+        continue;
       }
+      if (num === 1080 || num === 720 || num === 2160 || num === 264 || num === 265) {
+        continue;
+      }
+
+      episodeNum = match[1].padStart(2, "0");
+      break;
     }
   }
 
@@ -57,7 +65,7 @@ export function parseRssItem(item) {
     const hyphenMatch = rawTitle.match(/(?:-\s*|\s+)(\d{1,3}(?:\.5)?)(?:\s*v\d+)?(?:\s+\[|\s+|$)/i);
     if (hyphenMatch) {
       const num = parseInt(hyphenMatch[1], 10);
-      if (num !== 1080 && num !== 720 && num !== 2160) {
+      if (num !== 1080 && num !== 720 && num !== 2160 && num !== 264 && num !== 265) {
         episodeNum = hyphenMatch[1].padStart(2, "0");
       }
     }
@@ -80,6 +88,8 @@ export function parseRssItem(item) {
   const is720p = /720p|1280x720/i.test(rawTitle);
   const isH264 = /H\.?264|AVC/i.test(rawTitle);
   const isHEVC = /H\.?265|HEVC|AV1/i.test(rawTitle);
+  const isSoftSub = /简繁内封|内封|SRT|ASS|VTT/i.test(rawTitle);
+  const isChs = /简|CHS|GB/i.test(rawTitle);
 
   // Extract download URL
   let downloadUrl = "";
@@ -98,11 +108,13 @@ export function parseRssItem(item) {
     is720p,
     isH264,
     isHEVC,
+    isSoftSub,
+    isChs,
     cleanEpisodeName: isSpecial ? episodeNum : `Episode ${episodeNum}`
   };
 }
 
-// Deduplicate items so each episode number is included
+// Deduplicate items so each episode number is included only ONCE
 export function deduplicateAndFilterRssItems(rawItems) {
   const parsedList = rawItems.map(item => parseRssItem(item));
   
@@ -118,10 +130,16 @@ export function deduplicateAndFilterRssItems(rawItems) {
 
   const selectedList = [];
   for (const [epNum, items] of grouped.entries()) {
-    // Pick the best quality item for each episode number
+    // Pick the best quality & subtitle version for each episode number
     items.sort((a, b) => {
+      // Prioritize 1080p
       if (a.is1080p !== b.is1080p) return a.is1080p ? -1 : 1;
-      if (a.isHEVC !== b.isHEVC) return a.isHEVC ? -1 : 1;
+      // Prioritize soft subs (简繁内封) > hard subs
+      if (a.isSoftSub !== b.isSoftSub) return a.isSoftSub ? -1 : 1;
+      // Prioritize H.264 / AVC (fast 2s remux)
+      if (a.isH264 !== b.isH264) return a.isH264 ? -1 : 1;
+      // Prioritize Simplified Chinese (简)
+      if (a.isChs !== b.isChs) return a.isChs ? -1 : 1;
       return b.pubDate - a.pubDate;
     });
     selectedList.push(items[0]);
