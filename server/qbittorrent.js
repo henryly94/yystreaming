@@ -177,11 +177,14 @@ export class QBittorrentClient {
     const affected = [feedPath];
     if (feedUrl) affected.push(feedUrl);
 
+    // Auto-detect if user entered regex syntax (e.g. '|', '.*', '(?=...)')
+    const isRegex = /[|*?()+\[\]\\]/.test(mustContain);
+
     const ruleDef = {
       enabled: true,
       mustContain: mustContain,
       mustNotContain: "",
-      useRegex: false,
+      useRegex: isRegex,
       episodeFilter: "",
       smartFilter: false,
       previouslyMatchedEpisodes: [],

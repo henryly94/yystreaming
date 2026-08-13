@@ -192,12 +192,12 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. 简繁内封, CHS, 1080P (Leave blank to download all future releases)"
+                  placeholder="e.g. 1080p 简繁内封 (AND) or 简繁内封|简体内嵌 (OR)"
                   value={filterKeyword}
                   onChange={e => setFilterKeyword(e.target.value)}
                 />
                 <div className="form-help">
-                  Configures <code style={{ color: "var(--primary)" }}>mustContain</code> rule in qBittorrent to prevent duplicate subtitle downloads.
+                  Sets <code style={{ color: "var(--primary)" }}>mustContain</code> in qBittorrent. Use space for AND (<code style={{ color: "var(--primary)" }}>1080p 简繁</code>), or <code style={{ color: "var(--primary)" }}>|</code> for OR (<code style={{ color: "var(--primary)" }}>简繁|简体</code>).
                 </div>
               </div>
 
