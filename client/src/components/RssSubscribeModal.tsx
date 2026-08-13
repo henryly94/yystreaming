@@ -28,6 +28,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   const [showName, setShowName] = useState("");
+  const [filterKeyword, setFilterKeyword] = useState("");
   const [episodes, setEpisodes] = useState<ParsedEpisode[]>([]);
   const [step, setStep] = useState<"input" | "preview">("input");
 
@@ -53,7 +54,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
         setEpisodes(data.episodes);
         setStep("preview");
       } else {
-        setError(data.error || "Failed to preview RSS feed");
+        setError(data.error || "Failed to parse RSS feed");
       }
     } catch (err: any) {
       console.error("Error previewing RSS feed:", err);
@@ -77,6 +78,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
         body: JSON.stringify({
           rssUrl: rssUrl.trim(),
           showName: showName.trim(),
+          filterKeyword: filterKeyword.trim(),
           selectedEpisodes: episodes
         })
       });
@@ -182,6 +184,20 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 />
                 <div className="form-help">
                   This clean folder will be created inside your media directory.
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: "16px" }}>
+                <label className="form-label">Subgroup / Format Filter Keyword (Optional)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. 简繁内封, CHS, 1080P (Leave blank to download all future releases)"
+                  value={filterKeyword}
+                  onChange={e => setFilterKeyword(e.target.value)}
+                />
+                <div className="form-help">
+                  Configures <code style={{ color: "var(--primary)" }}>mustContain</code> rule in qBittorrent to prevent duplicate subtitle downloads.
                 </div>
               </div>
 

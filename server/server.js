@@ -270,8 +270,29 @@ function scanLibrary(videoDir) {
           const strippedKey = relPathNoExt.replace(/\.(chs|cht|zh-hans|zh-hant|zh-cn|zh-tw|zh-hk|zh|eng|en|chi|zho)$/i, '');
           const matchingSub = subtitleFiles.get(strippedKey);
 
-          // Build a friendly display name including subfolders (e.g. "Bonus/Episode 1")
-          const displayName = video.relativePath.slice(0, -video.ext.length);
+          // Extract episode number for friendly display badge
+          let epBadge = '';
+          const cnM = video.name.match(/第\s*(\d{1,4}(?:\.5)?)\s*(?:v\d+)?\s*[集話话]/i);
+          if (cnM) {
+            epBadge = `EP ${cnM[1].padStart(2, '0')} · `;
+          } else {
+            const epM = video.name.match(/(?:S\d+\s*)?E(?:P)?\s*(\d{1,4}(?:\.5)?)\b/i);
+            if (epM) {
+              epBadge = `EP ${epM[1].padStart(2, '0')} · `;
+            } else {
+              const bracketMatches = [...video.name.matchAll(/(?:\[|【)\s*(\d{1,3}(?:\.5)?)(?:v\d+)?\s*(?:\]|】)/g)];
+              for (const m of bracketMatches) {
+                const n = parseInt(m[1], 10);
+                if (n !== 1080 && n !== 720 && n !== 2160 && n !== 4 && n !== 264 && n !== 265) {
+                  epBadge = `EP ${m[1].padStart(2, '0')} · `;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Build a friendly display name including subfolders (e.g. "EP 01 · [Sakurato] Episode 1")
+          const displayName = `${epBadge}${video.relativePath.slice(0, -video.ext.length)}`;
 
           let duration = 0;
           try {
@@ -1018,7 +1039,7 @@ app.post('/api/rss/preview', async (req, res) => {
 
 // Auto-subscribe anime RSS and batch download past episodes via qBittorrent
 app.post('/api/rss/subscribe', async (req, res) => {
-  const { rssUrl, showName, selectedEpisodes } = req.body;
+  const { rssUrl, showName, selectedEpisodes, filterKeyword = "" } = req.body;
   if (!rssUrl || !showName || !selectedEpisodes || !Array.isArray(selectedEpisodes)) {
     return res.status(400).json({ error: 'Invalid subscription request payload' });
   }
@@ -1080,7 +1101,8 @@ app.post('/api/rss/subscribe', async (req, res) => {
       ruleName: `${showName} Auto-Download`,
       savePath: qbSavePath,
       feedPath: cleanFeedPath,
-      feedUrl: rssUrl
+      feedUrl: rssUrl,
+      mustContain: filterKeyword || ""
     });
 
     return res.json({
