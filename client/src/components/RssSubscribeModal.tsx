@@ -185,7 +185,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       }
 
       if (!epNum) {
-        const simpleHash = Math.abs(rawTitle.split("").reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0)).toString(36).slice(0, 4);
+        const simpleHash = Math.abs(rawTitle.split("").reduce((acc: number, char: string) => ((acc << 5) - acc) + char.charCodeAt(0), 0)).toString(36).slice(0, 4);
         epNum = `EP_${simpleHash}`;
       }
 
@@ -206,7 +206,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     // 3. Pick 1 best per episode number
     const selected: ParsedEpisode[] = [];
     for (const items of grouped.values()) {
-      items.sort((a, b) => {
+      items.sort((a: ParsedEpisode, b: ParsedEpisode) => {
         if (a.is1080p !== b.is1080p) return a.is1080p ? -1 : 1;
         if (a.isH264 !== b.isH264) return a.isH264 ? -1 : 1;
         return 0;
