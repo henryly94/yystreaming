@@ -58,6 +58,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [copiedIp, setCopiedIp] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mouseDownOnOverlay = useRef(false);
 
   const handleTestQb = async () => {
     setTestStatus({ loading: true, msg: 'Testing connection...' });
@@ -192,10 +193,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTimeout(() => setCopiedIp(null), 2000);
   };
 
-  const primaryIp = currentSettings.localIps.find(ip => ip.startsWith('192.168.') || ip.startsWith('10.')) || currentSettings.localIps[0];
+  const primaryIp = currentSettings ? (currentSettings.localIps.find(ip => ip.startsWith('192.168.') || ip.startsWith('10.')) || currentSettings.localIps[0]) : '';
   const primaryUrl = `http://${primaryIp}:${window.location.port || '3000'}`;
-
-  const mouseDownOnOverlay = useRef(false);
 
   const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     mouseDownOnOverlay.current = (e.target === e.currentTarget);

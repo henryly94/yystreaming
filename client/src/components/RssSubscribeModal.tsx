@@ -31,6 +31,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [filterKeyword, setFilterKeyword] = useState("");
   const [episodes, setEpisodes] = useState<ParsedEpisode[]>([]);
   const [step, setStep] = useState<"input" | "preview">("input");
+  const mouseDownOnOverlay = useRef(false);
 
   if (!isOpen) return null;
 
@@ -106,8 +107,6 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setStep("input");
     setError(null);
   };
-
-  const mouseDownOnOverlay = useRef(false);
 
   const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     mouseDownOnOverlay.current = (e.target === e.currentTarget);
