@@ -30,6 +30,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [showName, setShowName] = useState("");
   const [filterKeyword, setFilterKeyword] = useState("");
   const [episodes, setEpisodes] = useState<ParsedEpisode[]>([]);
+  const [rawItems, setRawItems] = useState<any[]>([]);
   const [step, setStep] = useState<"input" | "preview">("input");
   const mouseDownOnOverlay = useRef(false);
 
@@ -53,6 +54,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       if (res.ok && data.success) {
         setShowName(data.proposedShowName);
         setEpisodes(data.episodes);
+        setRawItems(data.rawItems || []);
         setStep("preview");
       } else {
         setError(data.error || "Failed to parse RSS feed");
@@ -80,7 +82,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
           rssUrl: rssUrl.trim(),
           showName: showName.trim(),
           filterKeyword: filterKeyword.trim(),
-          selectedEpisodes: episodes
+          selectedEpisodes: episodes,
+          rawItems
         })
       });
 
@@ -104,6 +107,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setRssUrl("");
     setShowName("");
     setEpisodes([]);
+    setRawItems([]);
     setStep("input");
     setError(null);
   };
@@ -119,20 +123,100 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     mouseDownOnOverlay.current = false;
   };
 
-  const filteredEpisodes = episodes.filter(ep => {
-    if (!filterKeyword.trim()) return true;
+  // Dynamically compute filtered & deduplicated episodes from rawItems
+  const filteredEpisodes = React.useMemo(() => {
     const kw = filterKeyword.trim();
     const isRegex = /[|*?()+\[\]\\]/.test(kw);
-    const title = ep.rawTitle || ep.cleanEpisodeName || "";
-    if (isRegex) {
-      try {
-        const regex = new RegExp(kw, 'i');
-        return regex.test(title);
-      } catch (e) {}
+
+    if (!rawItems || rawItems.length === 0) {
+      return episodes.filter(ep => {
+        if (!kw) return true;
+        const title = ep.rawTitle || ep.cleanEpisodeName || "";
+        if (isRegex) {
+          try { return new RegExp(kw, 'i').test(title); } catch (e) {}
+        }
+        return kw.split(/\s+/).filter(Boolean).every(k => title.toLowerCase().includes(k.toLowerCase()));
+      });
     }
-    const keywords = kw.split(/\s+/).filter(Boolean);
-    return keywords.every(k => title.toLowerCase().includes(k.toLowerCase()));
-  });
+
+    // 1. Filter raw items first by filterKeyword
+    const matchedRaw = rawItems.filter(item => {
+      if (!kw) return true;
+      const title = item.title || "";
+      if (isRegex) {
+        try { return new RegExp(kw, 'i').test(title); } catch (e) {}
+      }
+      return kw.split(/\s+/).filter(Boolean).every(k => title.toLowerCase().includes(k.toLowerCase()));
+    });
+
+    // 2. Parse & group by episodeNum
+    const grouped = new Map<string, ParsedEpisode[]>();
+    for (const item of matchedRaw) {
+      const rawTitle = item.title || "";
+      let epNum: string | null = null;
+      const cnMatch = rawTitle.match(/第\s*(\d{1,4}(?:\.5)?)\s*(?:v\d+)?\s*[集話话]/i);
+      if (cnMatch) epNum = cnMatch[1].padStart(2, "0");
+
+      if (!epNum) {
+        const epMatch = rawTitle.match(/(?:S\d+\s*)?E(?:P)?\s*(\d{1,4}(?:\.5)?)\b/i);
+        if (epMatch) epNum = epMatch[1].padStart(2, "0");
+      }
+
+      if (!epNum) {
+        const bracketMatches = [...rawTitle.matchAll(/(?:\[|【)\s*(\d{1,3}(?:\.5)?)(?:v\d+)?\s*(?:\]|】)/g)];
+        for (const match of bracketMatches) {
+          const fullMatchStr = match[0].toUpperCase();
+          const num = parseInt(match[1], 10);
+          if (fullMatchStr.includes("P") || fullMatchStr.includes("K") || fullMatchStr.includes("BIT")) continue;
+          if (num === 1080 || num === 720 || num === 2160 || num === 264 || num === 265) continue;
+          epNum = match[1].padStart(2, "0");
+          break;
+        }
+      }
+
+      if (!epNum) {
+        const hyphenMatch = rawTitle.match(/(?:-\s*|\s+)(\d{1,3}(?:\.5)?)(?:\s*v\d+)?(?:\s+\[|\s+|$)/i);
+        if (hyphenMatch) {
+          const num = parseInt(hyphenMatch[1], 10);
+          if (num !== 1080 && num !== 720 && num !== 2160 && num !== 264 && num !== 265) {
+            epNum = hyphenMatch[1].padStart(2, "0");
+          }
+        }
+      }
+
+      if (!epNum) {
+        const simpleHash = Math.abs(rawTitle.split("").reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0)).toString(36).slice(0, 4);
+        epNum = `EP_${simpleHash}`;
+      }
+
+      const parsed: ParsedEpisode = {
+        rawTitle,
+        episodeNum: epNum,
+        cleanEpisodeName: `Episode ${epNum}`,
+        isH264: /H\.?264|AVC/i.test(rawTitle),
+        is1080p: /1080p|1920x1080/i.test(rawTitle),
+        downloadUrl: item.enclosure?.url || item.link || "",
+        allReleasesCount: 1
+      };
+
+      if (!grouped.has(epNum)) grouped.set(epNum, []);
+      grouped.get(epNum)!.push(parsed);
+    }
+
+    // 3. Pick 1 best per episode number
+    const selected: ParsedEpisode[] = [];
+    for (const items of grouped.values()) {
+      items.sort((a, b) => {
+        if (a.is1080p !== b.is1080p) return a.is1080p ? -1 : 1;
+        if (a.isH264 !== b.isH264) return a.isH264 ? -1 : 1;
+        return 0;
+      });
+      selected.push(items[0]);
+    }
+
+    selected.sort((a, b) => a.episodeNum.localeCompare(b.episodeNum, undefined, { numeric: true }));
+    return selected;
+  }, [rawItems, episodes, filterKeyword]);
 
   return (
     <div className="modal-overlay" onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>

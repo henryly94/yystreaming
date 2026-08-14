@@ -115,8 +115,27 @@ export function parseRssItem(item) {
 }
 
 // Deduplicate items so each episode number is included only ONCE
-export function deduplicateAndFilterRssItems(rawItems) {
-  const parsedList = rawItems.map(item => parseRssItem(item));
+export function deduplicateAndFilterRssItems(rawItems, filterKeyword = "") {
+  let itemsToProcess = rawItems;
+
+  // 1. Filter ALL raw RSS items by filterKeyword first if provided
+  if (filterKeyword && filterKeyword.trim()) {
+    const kw = filterKeyword.trim();
+    const isRegex = /[|*?()+\[\]\\]/.test(kw);
+    itemsToProcess = rawItems.filter(item => {
+      const title = item.title || "";
+      if (isRegex) {
+        try {
+          const regex = new RegExp(kw, 'i');
+          return regex.test(title);
+        } catch (e) {}
+      }
+      const keywords = kw.split(/\s+/).filter(Boolean);
+      return keywords.every(k => title.toLowerCase().includes(k.toLowerCase()));
+    });
+  }
+
+  const parsedList = itemsToProcess.map(item => parseRssItem(item));
   
   // Group by episodeNum
   const grouped = new Map();

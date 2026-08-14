@@ -1041,7 +1041,8 @@ app.post('/api/rss/preview', async (req, res) => {
       proposedShowName,
       totalRawItems: items.length,
       episodesCount: deduplicatedEpisodes.length,
-      episodes: deduplicatedEpisodes
+      episodes: deduplicatedEpisodes,
+      rawItems: items
     });
   } catch (err) {
     console.error('Error previewing RSS feed:', err);
@@ -1051,7 +1052,7 @@ app.post('/api/rss/preview', async (req, res) => {
 
 // Auto-subscribe anime RSS and batch download past episodes via qBittorrent
 app.post('/api/rss/subscribe', async (req, res) => {
-  const { rssUrl, showName, selectedEpisodes, filterKeyword = "" } = req.body;
+  const { rssUrl, showName, selectedEpisodes, rawItems = [], filterKeyword = "" } = req.body;
   if (!rssUrl || !showName || !selectedEpisodes || !Array.isArray(selectedEpisodes)) {
     return res.status(400).json({ error: 'Invalid subscription request payload' });
   }
@@ -1096,9 +1097,11 @@ app.post('/api/rss/subscribe', async (req, res) => {
     const qb = new QBittorrentClient(settings);
     await qb.createCategory({ category: categoryName, savePath: qbSavePath });
 
-    // Filter past episodes by filterKeyword if provided
+    // Filter rawItems FIRST by filterKeyword, then deduplicate per episode
     let episodesToDownload = selectedEpisodes;
-    if (filterKeyword && filterKeyword.trim()) {
+    if (rawItems && Array.isArray(rawItems) && rawItems.length > 0) {
+      episodesToDownload = deduplicateAndFilterRssItems(rawItems, filterKeyword);
+    } else if (filterKeyword && filterKeyword.trim()) {
       const kw = filterKeyword.trim();
       const isRegex = /[|*?()+\[\]\\]/.test(kw);
       episodesToDownload = selectedEpisodes.filter(ep => {
