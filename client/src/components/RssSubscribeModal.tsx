@@ -119,6 +119,21 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     mouseDownOnOverlay.current = false;
   };
 
+  const filteredEpisodes = episodes.filter(ep => {
+    if (!filterKeyword.trim()) return true;
+    const kw = filterKeyword.trim();
+    const isRegex = /[|*?()+\[\]\\]/.test(kw);
+    const title = ep.rawTitle || ep.cleanEpisodeName || "";
+    if (isRegex) {
+      try {
+        const regex = new RegExp(kw, 'i');
+        return regex.test(title);
+      } catch (e) {}
+    }
+    const keywords = kw.split(/\s+/).filter(Boolean);
+    return keywords.every(k => title.toLowerCase().includes(k.toLowerCase()));
+  });
+
   return (
     <div className="modal-overlay" onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>
       <div className="modal-content" style={{ maxWidth: "680px" }} onClick={e => e.stopPropagation()}>
@@ -229,7 +244,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
 
               <div style={{ marginBottom: "16px" }}>
                 <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
-                  <span>Deduplicated Episodes ({episodes.length} past episodes)</span>
+                  <span>Matching Past Episodes ({filteredEpisodes.length} / {episodes.length} episodes)</span>
                   <span style={{ fontSize: "0.75rem", color: "#4ade80", display: "flex", alignItems: "center", gap: "4px" }}>
                     <Zap size={12} /> H.264 Fast Remux Prioritized
                   </span>
@@ -243,30 +258,36 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                   padding: "8px",
                   border: "1px solid var(--border-light)"
                 }}>
-                  {episodes.map(ep => (
-                    <div key={ep.episodeNum} style={{
-                      padding: "8px 12px",
-                      borderBottom: "1px solid var(--border-light)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      fontSize: "0.85rem"
-                    }}>
-                      <div>
-                        <span style={{ fontWeight: 600, color: "var(--text-main)", marginRight: "8px" }}>
-                          {ep.cleanEpisodeName}
-                        </span>
-                        {ep.isH264 && (
-                          <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", border: "1px solid rgba(34, 197, 94, 0.4)", fontSize: "0.7rem", padding: "1px 6px" }}>
-                            Fast Remux H.264
-                          </span>
-                        )}
-                      </div>
-                      <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", maxWidth: "260px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
-                        {ep.rawTitle}
-                      </span>
+                  {filteredEpisodes.length === 0 ? (
+                    <div style={{ padding: "16px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
+                      No episodes match the keyword "{filterKeyword}".
                     </div>
-                  ))}
+                  ) : (
+                    filteredEpisodes.map(ep => (
+                      <div key={ep.episodeNum} style={{
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--border-light)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "0.85rem"
+                      }}>
+                        <div>
+                          <span style={{ fontWeight: 600, color: "var(--text-main)", marginRight: "8px" }}>
+                            {ep.cleanEpisodeName}
+                          </span>
+                          {ep.isH264 && (
+                            <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", border: "1px solid rgba(34, 197, 94, 0.4)", fontSize: "0.7rem", padding: "1px 6px" }}>
+                              Fast Remux H.264
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-dim)", maxWidth: "260px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
+                          {ep.rawTitle}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 

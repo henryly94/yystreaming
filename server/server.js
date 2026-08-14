@@ -1096,7 +1096,25 @@ app.post('/api/rss/subscribe', async (req, res) => {
     const qb = new QBittorrentClient(settings);
     await qb.createCategory({ category: categoryName, savePath: qbSavePath });
 
-    const downloadUrls = selectedEpisodes.map(ep => ep.downloadUrl).filter(Boolean);
+    // Filter past episodes by filterKeyword if provided
+    let episodesToDownload = selectedEpisodes;
+    if (filterKeyword && filterKeyword.trim()) {
+      const kw = filterKeyword.trim();
+      const isRegex = /[|*?()+\[\]\\]/.test(kw);
+      episodesToDownload = selectedEpisodes.filter(ep => {
+        const title = ep.rawTitle || ep.cleanEpisodeName || "";
+        if (isRegex) {
+          try {
+            const regex = new RegExp(kw, 'i');
+            return regex.test(title);
+          } catch (e) {}
+        }
+        const keywords = kw.split(/\s+/).filter(Boolean);
+        return keywords.every(k => title.toLowerCase().includes(k.toLowerCase()));
+      });
+    }
+
+    const downloadUrls = episodesToDownload.map(ep => ep.downloadUrl).filter(Boolean);
 
     let torrentsAdded = false;
     let rssFeedAdded = false;
