@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { X, Rss, Download, Zap, AlertCircle, RefreshCw } from "lucide-react";
 
 interface ParsedEpisode {
