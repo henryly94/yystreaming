@@ -107,8 +107,21 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setError(null);
   };
 
+  const mouseDownOnOverlay = useRef(false);
+
+  const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    mouseDownOnOverlay.current = (e.target === e.currentTarget);
+  };
+
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && mouseDownOnOverlay.current) {
+      onClose();
+    }
+    mouseDownOnOverlay.current = false;
+  };
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>
       <div className="modal-content" style={{ maxWidth: "680px" }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>

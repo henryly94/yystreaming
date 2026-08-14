@@ -163,8 +163,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const primaryIp = currentSettings.localIps.find(ip => ip.startsWith('192.168.') || ip.startsWith('10.')) || currentSettings.localIps[0];
   const primaryUrl = `http://${primaryIp}:${window.location.port || '3000'}`;
 
+  const mouseDownOnOverlay = useRef(false);
+
+  const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    mouseDownOnOverlay.current = (e.target === e.currentTarget);
+  };
+
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && mouseDownOnOverlay.current) {
+      onClose();
+    }
+    mouseDownOnOverlay.current = false;
+  };
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>
           <X size={24} />
