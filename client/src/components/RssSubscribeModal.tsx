@@ -34,95 +34,6 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [step, setStep] = useState<"input" | "preview">("input");
   const mouseDownOnOverlay = useRef(false);
 
-  if (!isOpen) return null;
-
-  const handlePreview = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rssUrl.trim()) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/rss/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rssUrl: rssUrl.trim() })
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setShowName(data.proposedShowName);
-        setEpisodes(data.episodes);
-        setRawItems(data.rawItems || []);
-        setStep("preview");
-      } else {
-        setError(data.error || "Failed to parse RSS feed");
-      }
-    } catch (err: any) {
-      console.error("Error previewing RSS feed:", err);
-      setError("Error connecting to server: " + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubscribe = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!showName.trim() || episodes.length === 0) return;
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const res = await fetch("/api/rss/subscribe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rssUrl: rssUrl.trim(),
-          showName: showName.trim(),
-          filterKeyword: filterKeyword.trim(),
-          selectedEpisodes: episodes,
-          rawItems
-        })
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        onSuccess(`Subscribed to ${showName}! Queued ${data.episodesQueued} past episodes.`);
-        handleReset();
-        onClose();
-      } else {
-        setError(data.error || "Failed to subscribe RSS feed");
-      }
-    } catch (err: any) {
-      console.error("Error subscribing RSS feed:", err);
-      setError("Error connecting to server: " + err.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleReset = () => {
-    setRssUrl("");
-    setShowName("");
-    setEpisodes([]);
-    setRawItems([]);
-    setStep("input");
-    setError(null);
-  };
-
-  const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    mouseDownOnOverlay.current = (e.target === e.currentTarget);
-  };
-
-  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === e.currentTarget && mouseDownOnOverlay.current) {
-      onClose();
-    }
-    mouseDownOnOverlay.current = false;
-  };
-
   // Dynamically compute filtered & deduplicated episodes from rawItems
   const filteredEpisodes = React.useMemo(() => {
     const kw = filterKeyword.trim();
@@ -217,6 +128,95 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     selected.sort((a, b) => a.episodeNum.localeCompare(b.episodeNum, undefined, { numeric: true }));
     return selected;
   }, [rawItems, episodes, filterKeyword]);
+
+  if (!isOpen) return null;
+
+  const handlePreview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rssUrl.trim()) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/rss/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rssUrl: rssUrl.trim() })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShowName(data.proposedShowName);
+        setEpisodes(data.episodes);
+        setRawItems(data.rawItems || []);
+        setStep("preview");
+      } else {
+        setError(data.error || "Failed to parse RSS feed");
+      }
+    } catch (err: any) {
+      console.error("Error previewing RSS feed:", err);
+      setError("Error connecting to server: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubscribe = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!showName.trim() || episodes.length === 0) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/rss/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rssUrl: rssUrl.trim(),
+          showName: showName.trim(),
+          filterKeyword: filterKeyword.trim(),
+          selectedEpisodes: episodes,
+          rawItems
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onSuccess(`Subscribed to ${showName}! Queued ${data.episodesQueued} past episodes.`);
+        handleReset();
+        onClose();
+      } else {
+        setError(data.error || "Failed to subscribe RSS feed");
+      }
+    } catch (err: any) {
+      console.error("Error subscribing RSS feed:", err);
+      setError("Error connecting to server: " + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReset = () => {
+    setRssUrl("");
+    setShowName("");
+    setEpisodes([]);
+    setRawItems([]);
+    setStep("input");
+    setError(null);
+  };
+
+  const handleOverlayMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    mouseDownOnOverlay.current = (e.target === e.currentTarget);
+  };
+
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && mouseDownOnOverlay.current) {
+      onClose();
+    }
+    mouseDownOnOverlay.current = false;
+  };
 
   return (
     <div className="modal-overlay" onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>
