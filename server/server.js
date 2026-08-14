@@ -362,6 +362,10 @@ app.get('/api/settings', (req, res) => {
     qbUsername: settings.qbUsername || 'admin',
     qbPassword: settings.qbPassword || '',
     qbPathPrefix: settings.qbPathPrefix || '',
+    autoRemoveTorrents: settings.autoRemoveTorrents ?? false,
+    retentionHours: settings.retentionHours ?? 72,
+    ratioLimit: settings.ratioLimit ?? 1.5,
+    deleteOnIngest: settings.deleteOnIngest ?? false,
     localIps: getLocalIps(),
     ffmpegAvailable: checkFfmpeg()
   });
@@ -369,7 +373,7 @@ app.get('/api/settings', (req, res) => {
 
 // Update settings
 app.post('/api/settings', (req, res) => {
-  const { videoDir, qbHost, qbPort, qbUsername, qbPassword, qbPathPrefix } = req.body;
+  const { videoDir, qbHost, qbPort, qbUsername, qbPassword, qbPathPrefix, autoRemoveTorrents, retentionHours, ratioLimit, deleteOnIngest } = req.body;
   if (!videoDir) {
     return res.status(400).json({ error: 'videoDir is required' });
   }
@@ -393,6 +397,10 @@ app.post('/api/settings', (req, res) => {
   if (qbUsername !== undefined) settings.qbUsername = qbUsername;
   if (qbPassword !== undefined) settings.qbPassword = qbPassword;
   if (qbPathPrefix !== undefined) settings.qbPathPrefix = qbPathPrefix;
+  if (autoRemoveTorrents !== undefined) settings.autoRemoveTorrents = !!autoRemoveTorrents;
+  if (retentionHours !== undefined) settings.retentionHours = parseFloat(retentionHours) || 72;
+  if (ratioLimit !== undefined) settings.ratioLimit = parseFloat(ratioLimit) || 1.5;
+  if (deleteOnIngest !== undefined) settings.deleteOnIngest = !!deleteOnIngest;
 
   saveSettings(settings);
 
@@ -404,6 +412,10 @@ app.post('/api/settings', (req, res) => {
     qbPort: settings.qbPort,
     qbUsername: settings.qbUsername,
     qbPathPrefix: settings.qbPathPrefix,
+    autoRemoveTorrents: settings.autoRemoveTorrents,
+    retentionHours: settings.retentionHours,
+    ratioLimit: settings.ratioLimit,
+    deleteOnIngest: settings.deleteOnIngest,
     localIps: getLocalIps(),
     ffmpegAvailable: checkFfmpeg()
   });
@@ -1073,9 +1085,17 @@ app.post('/api/rss/subscribe', async (req, res) => {
       return showDir;
     };
     const qbSavePath = getQbSavePath(targetShowDir);
+    // Compute structured Category & Season Tags
+    const categoryName = `Anime/${showName}`;
+    const now = new Date();
+    const quarter = Math.floor(now.getMonth() / 3) + 1;
+    const seasonTag = `season:${now.getFullYear()}-Q${quarter}`;
+    const trackingTags = ['rss-auto', 'status:airing', seasonTag];
 
-    // 2. Initialize qBittorrent Client
+    // 2. Initialize qBittorrent Client and ensure category exists with mapped savePath
     const qb = new QBittorrentClient(settings);
+    await qb.createCategory({ category: categoryName, savePath: qbSavePath });
+
     const downloadUrls = selectedEpisodes.map(ep => ep.downloadUrl).filter(Boolean);
 
     let torrentsAdded = false;
@@ -1086,7 +1106,8 @@ app.post('/api/rss/subscribe', async (req, res) => {
       torrentsAdded = await qb.addTorrents({
         urls: downloadUrls,
         savePath: qbSavePath,
-        category: 'yyStreaming'
+        category: categoryName,
+        tags: trackingTags
       });
     }
 
@@ -1102,13 +1123,17 @@ app.post('/api/rss/subscribe', async (req, res) => {
       savePath: qbSavePath,
       feedPath: cleanFeedPath,
       feedUrl: rssUrl,
-      mustContain: filterKeyword || ""
+      mustContain: filterKeyword || "",
+      category: categoryName,
+      ratioLimit: settings.ratioLimit ?? 1.5,
+      seedingTimeLimit: (settings.retentionHours ?? 72) * 60
     });
 
     return res.json({
       success: true,
       message: `Successfully subscribed to ${showName}!`,
       targetShowDir,
+      category: categoryName,
       episodesQueued: downloadUrls.length,
       torrentsAdded,
       rssFeedAdded,
@@ -1116,9 +1141,58 @@ app.post('/api/rss/subscribe', async (req, res) => {
     });
   } catch (err) {
     console.error('Error subscribing RSS feed:', err);
-    return res.status(500).json({ error: 'Subscription failed: ' + err.message });
+    return res.status(500).json({ error: 'Error subscribing RSS feed: ' + err.message });
   }
 });
+
+// --- Background Torrent Lifecycle & Retention Worker ---
+async function runTorrentLifecycleWorker() {
+  try {
+    const settings = getSettings();
+    if (!settings.autoRemoveTorrents) {
+      return;
+    }
+
+    console.log('[Lifecycle Worker]: Running periodic qBittorrent seeding & retention check...');
+    const qb = new QBittorrentClient(settings);
+    
+    // Query completed torrents tagged with rss-auto
+    const completedTorrents = await qb.getTorrentsInfo({ filter: 'completed', tag: 'rss-auto' });
+    if (!completedTorrents || !Array.isArray(completedTorrents) || completedTorrents.length === 0) {
+      return;
+    }
+
+    const maxRatio = settings.ratioLimit ?? 1.5;
+    const maxSeedingSeconds = (settings.retentionHours ?? 72) * 3600;
+    const isDeleteOnIngest = settings.deleteOnIngest === true;
+    const hashesToDelete = [];
+
+    for (const torrent of completedTorrents) {
+      const seedingSeconds = torrent.seeding_time || torrent.time_conv || 0;
+      const ratio = torrent.ratio || 0;
+
+      const isRatioReached = ratio >= maxRatio;
+      const isTimeReached = seedingSeconds >= maxSeedingSeconds;
+
+      if (isDeleteOnIngest || isRatioReached || isTimeReached) {
+        console.log(`[Lifecycle Worker]: Pruning completed torrent '${torrent.name}' (ratio=${ratio.toFixed(2)}/${maxRatio}, seedTime=${Math.round(seedingSeconds/3600)}h/${Math.round(maxSeedingSeconds/3600)}h). Preserving disk media files.`);
+        hashesToDelete.push(torrent.hash);
+      }
+    }
+
+    if (hashesToDelete.length > 0) {
+      // deleteFiles = false GUARANTEES media files on disk are NEVER touched!
+      await qb.deleteTorrents({ hashes: hashesToDelete, deleteFiles: false });
+      console.log(`[Lifecycle Worker]: Successfully pruned ${hashesToDelete.length} seeded torrent task(s) from qBittorrent.`);
+    }
+  } catch (err) {
+    console.error('[Lifecycle Worker]: Error in lifecycle worker:', err.message);
+  }
+}
+
+// Run lifecycle worker every 30 minutes
+setInterval(runTorrentLifecycleWorker, 30 * 60 * 1000);
+setTimeout(runTorrentLifecycleWorker, 10 * 1000);
 
 // Explicit GET handlers to provide clear JSON feedback instead of default Express 404
 app.get('/api/rss/subscribe', (req, res) => {

@@ -11,12 +11,26 @@ interface Settings {
   qbUsername?: string;
   qbPassword?: string;
   qbPathPrefix?: string;
+  autoRemoveTorrents?: boolean;
+  retentionHours?: number;
+  ratioLimit?: number;
+  deleteOnIngest?: boolean;
 }
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (videoDir: string, qbConfig?: { qbHost: string; qbPort: number; qbUsername: string; qbPassword: string; qbPathPrefix?: string }) => Promise<boolean>;
+  onSave: (videoDir: string, qbConfig?: {
+    qbHost: string;
+    qbPort: number;
+    qbUsername: string;
+    qbPassword: string;
+    qbPathPrefix?: string;
+    autoRemoveTorrents?: boolean;
+    retentionHours?: number;
+    ratioLimit?: number;
+    deleteOnIngest?: boolean;
+  }) => Promise<boolean>;
   onRescan: () => Promise<void>;
   currentSettings: Settings | null;
 }
@@ -34,6 +48,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [qbUsername, setQbUsername] = useState('admin');
   const [qbPassword, setQbPassword] = useState('adminadmin');
   const [qbPathPrefix, setQbPathPrefix] = useState('');
+  const [autoRemoveTorrents, setAutoRemoveTorrents] = useState(false);
+  const [retentionHours, setRetentionHours] = useState(72);
+  const [ratioLimit, setRatioLimit] = useState(1.5);
+  const [deleteOnIngest, setDeleteOnIngest] = useState(false);
   const [testStatus, setTestStatus] = useState<{ loading: boolean; success?: boolean; msg: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRescanning, setIsRescanning] = useState(false);
@@ -108,6 +126,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (currentSettings.qbUsername) setQbUsername(currentSettings.qbUsername);
       if (currentSettings.qbPassword) setQbPassword(currentSettings.qbPassword);
       if (currentSettings.qbPathPrefix) setQbPathPrefix(currentSettings.qbPathPrefix);
+      if (currentSettings.autoRemoveTorrents !== undefined) setAutoRemoveTorrents(currentSettings.autoRemoveTorrents);
+      if (currentSettings.retentionHours !== undefined) setRetentionHours(currentSettings.retentionHours);
+      if (currentSettings.ratioLimit !== undefined) setRatioLimit(currentSettings.ratioLimit);
+      if (currentSettings.deleteOnIngest !== undefined) setDeleteOnIngest(currentSettings.deleteOnIngest);
     }
   }, [currentSettings, isOpen]);
 
@@ -141,7 +163,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    const success = await onSave(videoDir, { qbHost, qbPort, qbUsername, qbPassword, qbPathPrefix });
+    const success = await onSave(videoDir, {
+      qbHost,
+      qbPort,
+      qbUsername,
+      qbPassword,
+      qbPathPrefix,
+      autoRemoveTorrents,
+      retentionHours,
+      ratioLimit,
+      deleteOnIngest
+    });
     setIsSaving(false);
     if (success) {
       onClose();
@@ -269,6 +301,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                 If qBittorrent runs in Docker with <code style={{ color: 'var(--primary)' }}>-v /mnt/media_disk/downloads:/downloads</code>, set this to <code style={{ color: 'var(--primary)' }}>/downloads</code>.
               </span>
+            </div>
+
+            <div style={{ marginTop: '18px', paddingTop: '14px', borderTop: '1px solid var(--border-light)' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '10px' }}>
+                Torrent Lifecycle & Seeding Retention
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.82rem', color: 'var(--text-main)' }}>
+                  <input
+                    type="checkbox"
+                    checked={autoRemoveTorrents}
+                    onChange={(e) => setAutoRemoveTorrents(e.target.checked)}
+                  />
+                  <span>Auto-Prune Completed Torrents from Client (Preserves disk files)</span>
+                </label>
+
+                {autoRemoveTorrents && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '4px', paddingLeft: '22px' }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Max Seeding Hours</label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="input-text"
+                        value={retentionHours}
+                        onChange={(e) => setRetentionHours(parseFloat(e.target.value) || 72)}
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label" style={{ fontSize: '0.75rem' }}>Max Ratio Limit</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0.1"
+                        className="input-text"
+                        value={ratioLimit}
+                        onChange={(e) => setRatioLimit(parseFloat(e.target.value) || 1.5)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>

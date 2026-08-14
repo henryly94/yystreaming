@@ -260,7 +260,17 @@ export default function App() {
     return `${secs}s`;
   };
 
-  const handleSaveSettings = async (videoDir: string, qbConfig?: { qbHost: string; qbPort: number; qbUsername: string; qbPassword: string; qbPathPrefix?: string }): Promise<boolean> => {
+  const handleSaveSettings = async (videoDir: string, qbConfig?: {
+    qbHost: string;
+    qbPort: number;
+    qbUsername: string;
+    qbPassword: string;
+    qbPathPrefix?: string;
+    autoRemoveTorrents?: boolean;
+    retentionHours?: number;
+    ratioLimit?: number;
+    deleteOnIngest?: boolean;
+  }): Promise<boolean> => {
     try {
       const payload = { videoDir, ...qbConfig };
       const res = await fetch('/api/settings', {

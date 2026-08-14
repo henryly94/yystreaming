@@ -141,15 +141,16 @@ export class QBittorrentClient {
   }
 
   // Batch add magnet/torrent URLs to target save path
-  async addTorrents({ urls, savePath, category = "yyStreaming" }) {
+  async addTorrents({ urls, savePath, category = "Anime/General", tags = "" }) {
     const urlList = Array.isArray(urls) ? urls.join("\n") : urls;
-    console.log(`[qBittorrent API]: Adding torrent(s) via FormData to savePath: '${savePath}'`);
+    console.log(`[qBittorrent API]: Adding torrent(s) via FormData to savePath: '${savePath}' (category: '${category}', tags: '${tags}')`);
     
     // qBittorrent /torrents/add requires multipart/form-data
     const formData = new FormData();
     formData.append("urls", urlList);
     formData.append("savepath", savePath);
-    formData.append("category", category);
+    if (category) formData.append("category", category);
+    if (tags) formData.append("tags", Array.isArray(tags) ? tags.join(",") : tags);
     formData.append("autoTMM", "false");
     formData.append("paused", "false");
     formData.append("stopped", "false");
@@ -158,6 +159,92 @@ export class QBittorrentClient {
     const text = await res.text();
     console.log(`[qBittorrent API]: /torrents/add result: Status ${res.status}, Body: '${text}'`);
     return res.ok;
+  }
+
+  // Create Category with mapped savePath
+  async createCategory({ category, savePath = "" }) {
+    if (!category) return false;
+    console.log(`[qBittorrent API]: Creating category '${category}' with savePath '${savePath}'`);
+    try {
+      const res = await this.request('/torrents/createCategory', {
+        category,
+        savePath
+      });
+      const text = await res.text();
+      console.log(`[qBittorrent API]: /torrents/createCategory result: Status ${res.status}, Body: '${text}'`);
+      return res.ok;
+    } catch (err) {
+      console.warn(`[qBittorrent API]: Category creation warning: ${err.message}`);
+      return false;
+    }
+  }
+
+  // Add Tags to torrent hashes
+  async addTags({ hashes, tags }) {
+    const hashStr = Array.isArray(hashes) ? hashes.join("|") : hashes;
+    const tagStr = Array.isArray(tags) ? tags.join(",") : tags;
+    console.log(`[qBittorrent API]: Adding tags '${tagStr}' to hashes '${hashStr}'`);
+    try {
+      const res = await this.request('/torrents/addTags', {
+        hashes: hashStr,
+        tags: tagStr
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn(`[qBittorrent API]: addTags warning: ${err.message}`);
+      return false;
+    }
+  }
+
+  // Query torrent info with optional filter/tag/category
+  async getTorrentsInfo({ filter = "", tag = "", category = "" } = {}) {
+    const queryParams = new URLSearchParams();
+    if (filter) queryParams.append("filter", filter);
+    if (tag) queryParams.append("tag", tag);
+    if (category) queryParams.append("category", category);
+
+    const queryString = queryParams.toString();
+    const endpoint = `/torrents/info${queryString ? "?" + queryString : ""}`;
+
+    const originUrl = `http://${this.host}:${this.port}`;
+    const headers = {
+      "Referer": originUrl,
+      "Origin": originUrl,
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    };
+    if (this.cookie) headers["Cookie"] = this.cookie;
+
+    const res = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+    if (!res.ok) {
+      if ((res.status === 403 || res.status === 401)) {
+        const loggedIn = await this.login();
+        if (loggedIn && this.cookie) {
+          headers["Cookie"] = this.cookie;
+          const retryRes = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+          return retryRes.ok ? await retryRes.json() : [];
+        }
+      }
+      return [];
+    }
+    return await res.json();
+  }
+
+  // Delete torrent tasks (deleteFiles = false guarantees media files on disk are NEVER deleted)
+  async deleteTorrents({ hashes, deleteFiles = false }) {
+    const hashStr = Array.isArray(hashes) ? hashes.join("|") : hashes;
+    console.log(`[qBittorrent API]: Deleting torrent task(s): '${hashStr}' (deleteFiles=${deleteFiles})`);
+    try {
+      const res = await this.request('/torrents/delete', {
+        hashes: hashStr,
+        deleteFiles: deleteFiles.toString()
+      });
+      const text = await res.text();
+      console.log(`[qBittorrent API]: /torrents/delete result: Status ${res.status}, Body: '${text}'`);
+      return res.ok;
+    } catch (err) {
+      console.error(`[qBittorrent API]: Delete torrent failed: ${err.message}`);
+      return false;
+    }
   }
 
   // Add RSS Feed subscription URL
@@ -172,8 +259,22 @@ export class QBittorrentClient {
     return res.ok;
   }
 
+  // Remove RSS Rule
+  async removeRssRule({ ruleName }) {
+    console.log(`[qBittorrent API]: Removing RSS Rule '${ruleName}'`);
+    try {
+      const res = await this.request('/rss/removeRule', {
+        ruleName: ruleName
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn(`[qBittorrent API]: removeRssRule warning: ${err.message}`);
+      return false;
+    }
+  }
+
   // Create RSS Downloader Auto-Rule
-  async setRssRule({ ruleName, savePath, feedPath, feedUrl = "", mustContain = "" }) {
+  async setRssRule({ ruleName, savePath, feedPath, feedUrl = "", mustContain = "", category = "", ratioLimit = 1.5, seedingTimeLimit = 4320 }) {
     const affected = [feedPath];
     if (feedUrl) affected.push(feedUrl);
 
@@ -190,11 +291,14 @@ export class QBittorrentClient {
       previouslyMatchedEpisodes: [],
       affectedFeeds: affected,
       savePath: savePath,
+      assignedCategory: category,
+      ratioLimit: parseFloat(ratioLimit) || 1.5,
+      seedingTimeLimit: parseInt(seedingTimeLimit, 10) || 4320,
       autoDeleteMode: 0,
       addPaused: false
     };
 
-    console.log(`[qBittorrent API]: Setting RSS Rule '${ruleName}' for path '${feedPath}' -> '${savePath}'`);
+    console.log(`[qBittorrent API]: Setting RSS Rule '${ruleName}' for path '${feedPath}' -> '${savePath}' (category: '${category}')`);
     const res = await this.request('/rss/setRule', {
       ruleName: ruleName,
       ruleDef: JSON.stringify(ruleDef)

@@ -214,6 +214,20 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 </div>
               </div>
 
+              <div style={{ marginBottom: "14px", padding: "10px 12px", background: "var(--surface-hover)", borderRadius: "8px", border: "1px solid var(--border-light)", fontSize: "0.78rem" }}>
+                <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+                  <div>
+                    <span style={{ color: "var(--text-muted)", marginRight: "6px" }}>Category:</span>
+                    <span style={{ fontWeight: 600, color: "var(--primary)" }}>Anime/{showName || 'ShowTitle'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: "var(--text-muted)", marginRight: "6px" }}>Auto Tags:</span>
+                    <span className="badge" style={{ background: "rgba(99, 102, 241, 0.2)", color: "#a5b4fc", border: "1px solid rgba(99, 102, 241, 0.4)", marginRight: "4px" }}>rss-auto</span>
+                    <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#86efac", border: "1px solid rgba(34, 197, 94, 0.4)" }}>status:airing</span>
+                  </div>
+                </div>
+              </div>
+
               <div style={{ marginBottom: "16px" }}>
                 <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between" }}>
                   <span>Deduplicated Episodes ({episodes.length} past episodes)</span>
