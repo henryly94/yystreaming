@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { execSync, spawn } from 'child_process';
 import { cleanShowName, deduplicateAndFilterRssItems } from './rss_parser.js';
 import { QBittorrentClient } from './qbittorrent.js';
+import { searchMikanAnime, getMikanBangumiDetails } from './mikan_search.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1012,6 +1013,41 @@ function parseXmlRssItems(xmlText) {
 
   return { rawChannelTitle, items };
 }
+
+// Search anime on Mikan Project
+app.get('/api/anime/search', async (req, res) => {
+  const query = req.query.q || '';
+  if (!query.trim()) {
+    return res.json({ success: true, count: 0, results: [] });
+  }
+
+  try {
+    const results = await searchMikanAnime(query.trim());
+    return res.json({ success: true, count: results.length, results });
+  } catch (err) {
+    console.error('Error in /api/anime/search:', err);
+    return res.status(500).json({ error: 'Search failed: ' + err.message });
+  }
+});
+
+// Fetch detailed fansub subgroups for a specific bangumi ID
+app.get('/api/anime/details/:bangumiId', async (req, res) => {
+  const { bangumiId } = req.params;
+  if (!bangumiId) {
+    return res.status(400).json({ error: 'bangumiId is required' });
+  }
+
+  try {
+    const details = await getMikanBangumiDetails(bangumiId);
+    if (!details) {
+      return res.status(404).json({ error: 'Bangumi details not found' });
+    }
+    return res.json({ success: true, details });
+  } catch (err) {
+    console.error('Error in /api/anime/details:', err);
+    return res.status(500).json({ error: 'Failed to fetch details: ' + err.message });
+  }
+});
 
 // Preview RSS Feed items and proposed clean folder/filenames
 app.post('/api/rss/preview', async (req, res) => {

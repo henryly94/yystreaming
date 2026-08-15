@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Tv, Settings as SettingsIcon, Play, Pause, AlertCircle, 
   Search, ArrowLeft, CheckCircle2, CircleDot, RefreshCw,
-  ArrowUp, Rss
+  ArrowUp, Sparkles
 } from 'lucide-react';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SettingsModal } from './components/SettingsModal';
@@ -398,8 +398,8 @@ export default function App() {
 
         <div className="nav-actions" style={{ display: 'flex', gap: '8px' }}>
           <button className="btn btn-primary" onClick={() => setIsRssModalOpen(true)}>
-            <Rss size={16} />
-            Import Anime RSS
+            <Sparkles size={16} />
+            Track Anime
           </button>
           <button className="btn" onClick={() => setIsSettingsOpen(true)}>
             <SettingsIcon size={16} />
