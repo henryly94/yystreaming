@@ -95,19 +95,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleCast = () => {
     const video = videoRef.current;
+    if (!video) return;
+
+    // 1. Safari / iOS / macOS AirPlay Target Picker
     // @ts-ignore
-    if (!video || !video.remote) {
-      alert("Casting is not supported in this browser. Please use Google Chrome.");
+    if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
+      try {
+        // @ts-ignore
+        video.webkitShowPlaybackTargetPicker();
+        return;
+      } catch (err: any) {
+        console.warn('AirPlay target picker failed:', err);
+      }
+    }
+
+    // 2. Google Cast Framework (Chromecast SDK)
+    // @ts-ignore
+    if (window.cast && window.cast.framework) {
+      try {
+        // @ts-ignore
+        const context = window.cast.framework.CastContext.getInstance();
+        context.requestSession().then(
+          () => console.log('Google Cast session started'),
+          (err: any) => console.log('Cast session cancelled/failed:', err)
+        );
+        return;
+      } catch (err: any) {
+        console.warn('Cast framework request failed:', err);
+      }
+    }
+
+    // 3. W3C Remote Playback API (Chrome / Android / Edge)
+    // @ts-ignore
+    if (video.remote && typeof video.remote.prompt === 'function') {
+      // @ts-ignore
+      video.remote.prompt()
+        .then(() => {
+          console.log('Remote playback prompt succeeded');
+        })
+        .catch((err: any) => {
+          if (err.name === 'NotSupportedError') {
+            alert("No Cast / AirPlay device (Chromecast, Smart TV, Apple TV) was found on your local Wi-Fi network, or casting is disabled in browser settings.");
+          } else if (err.name !== 'AbortError') {
+            alert("Casting failed: " + err.message);
+          }
+        });
       return;
     }
-    // @ts-ignore
-    video.remote.prompt()
-      .then(() => {
-        console.log('Remote playback prompt succeeded');
-      })
-      .catch((err: any) => {
-        alert("Casting failed: " + err.message + " (" + err.name + ")");
-      });
+
+    alert("Casting is not supported on this device/browser. Please use Safari (for AirPlay) or Google Chrome (for Chromecast).");
   };
 
   // Load progress on mount or episode change
@@ -532,6 +568,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className="native-video"
         onClick={togglePlay}
         playsInline
+        // @ts-ignore
+        x-webkit-airplay="allow"
       >
         {subtitleUrl && (
           <track
