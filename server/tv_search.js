@@ -72,14 +72,24 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       if (res.ok) {
         const data = await res.json();
         if (data && data.length > 0 && data[0].name !== 'No results returned') {
-          const seasonRegex = new RegExp(`S0?${seasonNumber}|Season\\s*0?${seasonNumber}|S0?1-0?${seasonNumber}|Complete`, 'i');
-
           for (const t of data) {
             const tNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, ' ');
             const titleMatches = searchWords.every(w => tNorm.includes(w));
             if (!titleMatches) continue;
 
-            const isSeasonMatch = seasonRegex.test(t.name);
+            // 1. Direct Episode / Season Match: S02, S02E01, Season 2, S2E1, Season.02
+            const directRegex = new RegExp(`(?:\\bS0?${seasonNumber}(?:E\\d+|\\b)|\\bSeason[.\\s_-]*0?${seasonNumber}\\b)`, 'i');
+            let isSeasonMatch = directRegex.test(t.name);
+
+            // 2. Boxsets covering seasonNumber (e.g. S01-S05)
+            if (!isSeasonMatch) {
+              const boxsetMatch = t.name.match(/(?:s0?1\s*-\s*s?0?([2-9])|seasons?\s*0?1\s*-\s*0?([2-9]))/i);
+              if (boxsetMatch) {
+                const endSeason = parseInt(boxsetMatch[1] || boxsetMatch[2], 10);
+                if (seasonNumber <= endSeason) isSeasonMatch = true;
+              }
+            }
+
             if (!isSeasonMatch) continue;
 
             const magnet = `magnet:?xt=urn:btih:${t.info_hash}&dn=${encodeURIComponent(t.name)}`;
@@ -121,7 +131,26 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
   const selected = [];
   for (const [epNum, list] of grouped.entries()) {
     list.sort((a, b) => {
-      // Score: 1080p > 720p > 480p > 4K (4K deprioritized to prevent massive 6GB single episode downloads)
+      if (epNum === 'Season_Pack') {
+        const scorePack = (item) => {
+          let score = 0;
+          const isDirectSeason = new RegExp(`(?:\\bS0?${seasonNumber}\\b|\\bSeason[.\\s_-]*0?${seasonNumber}\\b)`, 'i').test(item.rawTitle);
+          if (isDirectSeason) score += 100;
+
+          const sizeNum = parseFloat(item.sizeMb || '0');
+          if (sizeNum >= 1500 && sizeNum <= 15000) score += 50; // Sweet spot: 1.5GB - 15GB for whole season
+          else if (sizeNum > 30000) score -= 50; // Penalize 30GB+ multi-season dumps
+
+          if (item.is1080p) score += 30;
+          else if (item.is720p) score += 20;
+
+          score += Math.min(item.seeds || 0, 30);
+          return score;
+        };
+        return scorePack(b) - scorePack(a);
+      }
+
+      // Single episode Score: 1080p > 720p > 480p > 4K (4K deprioritized to prevent massive 6GB single episode downloads)
       const getScore = (item) => {
         let score = 0;
         if (item.is1080p) score = 100;

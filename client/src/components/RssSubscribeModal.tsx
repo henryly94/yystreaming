@@ -327,8 +327,11 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   };
 
   // 1-Click Track TV Show Season
-  const handleTrackTvSeason = async () => {
+  const handleTrackTvSeason = async (customEpisodes?: ParsedEpisode[]) => {
     if (!selectedTvShow || !selectedSeason || tvEpisodes.length === 0) return;
+
+    const episodesToSend = customEpisodes || tvEpisodes.filter(e => e.episodeNum !== 'Season_Pack');
+    if (episodesToSend.length === 0) return;
 
     setSubmitting(true);
     setError(null);
@@ -342,13 +345,13 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
           showType: selectedTvShow.showType,
           seasonNumber: selectedSeason.seasonNumber,
           posterUrl: selectedSeason.posterUrl || selectedTvShow.posterUrl,
-          selectedEpisodes: tvEpisodes
+          selectedEpisodes: episodesToSend
         })
       });
 
       const data = await res.json();
       if (res.ok && data.success) {
-        onSuccess(`Tracked ${selectedTvShow.name} Season ${selectedSeason.seasonNumber}! Queued ${data.episodesQueued} episodes.`);
+        onSuccess(`Tracked ${selectedTvShow.name} Season ${selectedSeason.seasonNumber}! Queued ${data.episodesQueued} torrents.`);
         handleReset();
         onClose();
       } else {
@@ -875,6 +878,18 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                               {ep.rawTitle}
                             </div>
                           </div>
+
+                          {isPack && (
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              onClick={() => handleTrackTvSeason([ep])}
+                              disabled={submitting}
+                              style={{ padding: "4px 10px", fontSize: "0.75rem", whiteSpace: "nowrap", marginLeft: "10px" }}
+                            >
+                              ⚡ Track Full Season Pack
+                            </button>
+                          )}
                         </div>
                       );
                     })
@@ -889,15 +904,15 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  onClick={handleTrackTvSeason}
-                  disabled={submitting || tvEpisodes.length === 0}
+                  onClick={() => handleTrackTvSeason(tvEpisodes.filter(e => e.episodeNum !== 'Season_Pack'))}
+                  disabled={submitting || tvEpisodes.filter(e => e.episodeNum !== 'Season_Pack').length === 0}
                 >
                   {submitting ? (
                     <>
                       <RefreshCw size={14} className="spin" /> Sending to qBittorrent...
                     </>
                   ) : (
-                    `🚀 1-Click Track Season ${selectedSeason.seasonNumber} (${tvEpisodes.length} Episodes)`
+                    `🚀 Track All ${tvEpisodes.filter(e => e.episodeNum !== 'Season_Pack').length} Individual Episodes`
                   )}
                 </button>
               </div>
