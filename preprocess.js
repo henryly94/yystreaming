@@ -475,7 +475,7 @@ async function main() {
     const escapedSrtName = srtFileName.replace(/'/g, "\\'");
     const tempOutputFileName = item.baseName + '.mp4.tmp';
 
-    const ffmpegArgs = ['-y', '-i', item.fileName];
+    const ffmpegArgs = ['-y', '-threads', '0', '-i', item.fileName];
 
     if (hasSrt) {
       // Subtitles present: Transcode video with burned-in subtitles for AirPlay/TV rendering
@@ -483,7 +483,7 @@ async function main() {
       ffmpegArgs.push(
         '-vf', `scale='min(1920,iw)':-2,format=yuv420p,subtitles='${escapedSrtName}':force_style='PlayResY=1080,FontSize=28,MarginV=25'`,
         '-c:v', 'libx264',
-        '-preset', 'fast',
+        '-preset', 'veryfast',
         '-crf', '21',
         '-c:a', 'aac',
         '-ac', '2',
@@ -516,7 +516,7 @@ async function main() {
       ffmpegArgs.push(
         '-vf', "scale='min(1920,iw)':-2,format=yuv420p",
         '-c:v', 'libx264',
-        '-preset', 'fast',
+        '-preset', 'veryfast',
         '-crf', '21',
         '-c:a', 'aac',
         '-ac', '2',
