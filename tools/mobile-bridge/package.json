@@ -1,0 +1,15 @@
+{
+  "name": "antigravity-mobile-bridge",
+  "version": "1.0.0",
+  "description": "Mobile Web Bridge for Google Antigravity IDE",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
