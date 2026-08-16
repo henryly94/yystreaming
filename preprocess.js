@@ -147,24 +147,13 @@ function scanDirectory(dir, videoFiles = []) {
         if (!fs.existsSync(mp4Path)) {
           needTranscode = true;
         } else {
-          // If mp4 exists, check if it is valid and playable
           try {
-            execSync(`"${ffprobeCmd}" -v error -show_format "${mp4Path}"`, { stdio: 'ignore' });
-
-            const originalProbe = probeStreams(fullPath);
-            const hasEmbeddedSub = hasTextSubtitle(originalProbe);
-            const hasExternalSub = !!findBestExternalSubtitle(dir, baseName);
-            if (hasEmbeddedSub || hasExternalSub) {
-              if (!hasBurnedSubtitles(mp4Path)) {
-                console.log(`[Preprocessor]: Optimized file ${baseName}.mp4 lacks burned-in subtitles. Queueing for non-disruptive rebuild.`);
-                needTranscode = true;
-              }
+            const mp4Stat = fs.statSync(mp4Path);
+            if (mp4Stat.size < 100000) { // < 100KB indicates incomplete file
+              try { fs.unlinkSync(mp4Path); } catch (e) {}
+              needTranscode = true;
             }
           } catch (e) {
-            console.log(`[Preprocessor]: Detected corrupted optimized file: ${baseName}.mp4. Deleting and re-queueing for transcoding.`);
-            try {
-              fs.unlinkSync(mp4Path);
-            } catch (unlinkErr) {}
             needTranscode = true;
           }
         }
@@ -258,7 +247,7 @@ function isSkipRequested() {
   return false;
 }
 
-// Calculate smart priority score for an optimization item
+// Calculate smart priority score for an optimization item (fast heuristic + file size)
 function scoreVideoForOptimization(item) {
   let score = 0;
   try {
@@ -268,33 +257,19 @@ function scoreVideoForOptimization(item) {
       sizeMb = stat.size / (1024 * 1024);
     } catch (e) {}
 
-    const probe = probeStreams(item.absolutePath);
-    const vStream = getVideoStream(probe);
-    const aStream = getAudioStream(probe);
-    const subStream = getTextSubtitleStream(probe);
-    const hasExtSub = !!findBestExternalSubtitle(item.directory, item.baseName);
+    const lowerName = item.fileName.toLowerCase();
+    const isLikelyH264 = lowerName.includes('x264') || lowerName.includes('h264') || lowerName.includes('h.264');
+    const isLikelyHEVC = lowerName.includes('x265') || lowerName.includes('hevc') || lowerName.includes('10bit') || lowerName.includes('2160p') || lowerName.includes('4k');
 
-    const vCodec = vStream ? (vStream.codec_name || '').toLowerCase() : '';
-    const pixFmt = vStream ? (vStream.pix_fmt || '').toLowerCase() : '';
-    const aCodec = aStream ? (aStream.codec_name || '').toLowerCase() : '';
-
-    const isH264 = vCodec === 'h264';
-    const is8Bit = !pixFmt || pixFmt === 'yuv420p';
-    const isAacOrMp3 = ['aac', 'mp3'].includes(aCodec);
-    const hasSubtitles = subStream || hasExtSub;
-
-    if (!hasSubtitles && isH264 && is8Bit && isAacOrMp3) {
-      // 1. Ultra Fast Remux (2 to 5 seconds) -> Tier 1 (Score 10,000,000)
+    if (isLikelyH264 && !isLikelyHEVC) {
       score = 10000000 - sizeMb;
-      item.optType = 'Fast Remux (2s)';
-    } else if (!hasSubtitles && isH264 && is8Bit) {
-      // 2. Video Copy + Fast Audio Transcode -> Tier 2 (Score 5,000,000)
-      score = 5000000 - sizeMb;
-      item.optType = 'Video Copy + Audio (15s)';
-    } else {
-      // 3. Full Transcode (HEVC / 10-bit / Burn Subtitles) -> Tier 3 (Smallest files first)
+      item.optType = '⚡ Fast Remux (2s)';
+    } else if (isLikelyHEVC) {
       score = 1000000 - sizeMb;
-      item.optType = hasSubtitles ? 'Burn Subtitles' : 'Full Transcode';
+      item.optType = '🔥 Full Transcode (HEVC/4K)';
+    } else {
+      score = 5000000 - sizeMb;
+      item.optType = '⚡ Light Transcode';
     }
   } catch (err) {
     score = 0;
