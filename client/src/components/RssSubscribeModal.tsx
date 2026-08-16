@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from "react";
-import { X, Rss, Search, Sparkles, Film, ArrowLeft, Zap, AlertCircle, RefreshCw, Layers } from "lucide-react";
+import { X, Rss, Search, Sparkles, Film, ArrowLeft, Zap, AlertCircle, RefreshCw, Layers, Tv } from "lucide-react";
 
 interface ParsedEpisode {
   rawTitle: string;
@@ -8,13 +8,26 @@ interface ParsedEpisode {
   isH264: boolean;
   is1080p: boolean;
   downloadUrl: string;
-  allReleasesCount: number;
+  allReleasesCount?: number;
+  seasonNumber?: number;
+  sizeMb?: string;
+  seeds?: number;
 }
 
-interface SearchAnimeResult {
-  bangumiId: string;
-  title: string;
-  poster: string;
+interface UniversalSearchResult {
+  id: string;
+  source: 'mikan' | 'tmdb';
+  mediaType: 'anime' | 'tv' | 'movie';
+  showType: 'Anime' | 'Chinese' | 'Western' | 'Korean' | 'Japanese' | 'TV';
+  name: string;
+  originalName: string;
+  bangumiId?: string;
+  tmdbId?: number;
+  posterUrl: string | null;
+  backdropUrl?: string | null;
+  year?: string;
+  country?: string[];
+  overview?: string;
 }
 
 interface SubgroupInfo {
@@ -35,6 +48,33 @@ interface AnimeDetails {
   subgroups: SubgroupInfo[];
 }
 
+interface TmdbSeason {
+  id: number;
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
+  airDate: string;
+  overview: string;
+  posterUrl: string | null;
+}
+
+interface TmdbShowDetails {
+  id: number;
+  mediaType: string;
+  showType: string;
+  name: string;
+  originalName: string;
+  imdbId: string | null;
+  overview: string;
+  country: string[];
+  numberOfSeasons: number;
+  numberOfEpisodes: number;
+  status: string;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+  seasons: TmdbSeason[];
+}
+
 interface RssSubscribeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -48,14 +88,21 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
 }) => {
   // Mode & navigation state
   const [activeTab, setActiveTab] = useState<"search" | "direct">("search");
-  const [step, setStep] = useState<"search" | "subgroups" | "direct_input" | "preview">("search");
+  const [step, setStep] = useState<"search" | "anime_subgroups" | "tv_seasons" | "tv_episodes" | "direct_input" | "preview">("search");
+  const [mediaFilter, setMediaFilter] = useState<"all" | "anime" | "tv">("all");
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchAnimeResult[]>([]);
+  const [searchResults, setSearchResults] = useState<UniversalSearchResult[]>([]);
+  
+  // Selected Anime / TV Show
   const [selectedAnime, setSelectedAnime] = useState<AnimeDetails | null>(null);
+  const [selectedTvShow, setSelectedTvShow] = useState<TmdbShowDetails | null>(null);
+  const [selectedSeason, setSelectedSeason] = useState<TmdbSeason | null>(null);
+  const [tvEpisodes, setTvEpisodes] = useState<ParsedEpisode[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
   // Direct / Selected RSS state
   const [rssUrl, setRssUrl] = useState("");
@@ -168,7 +215,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle searching anime on Mikan
+  // Handle universal search (TMDB + Mikan)
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -176,37 +223,38 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setSearching(true);
     setError(null);
     setSelectedAnime(null);
+    setSelectedTvShow(null);
 
     try {
-      const res = await fetch(`/api/anime/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      const res = await fetch(`/api/media/search?q=${encodeURIComponent(searchQuery.trim())}&type=${mediaFilter}`);
       const data = await res.json();
       if (res.ok && data.success) {
         setSearchResults(data.results || []);
         if (data.results.length === 0) {
-          setError(`No anime found for "${searchQuery.trim()}". Try simplifying your keywords.`);
+          setError(`No TV shows or Anime found for "${searchQuery.trim()}". Try simplifying your keywords.`);
         }
       } else {
         setError(data.error || "Search failed");
       }
     } catch (err: any) {
-      console.error("Error searching anime:", err);
+      console.error("Error searching media:", err);
       setError("Error connecting to server: " + err.message);
     } finally {
       setSearching(false);
     }
   };
 
-  // Handle selecting an anime to load its subgroups
-  const handleSelectAnime = async (anime: SearchAnimeResult) => {
+  // Handle selecting an anime (Mikan)
+  const handleSelectAnime = async (bangumiId: string) => {
     setLoadingDetails(true);
     setError(null);
 
     try {
-      const res = await fetch(`/api/anime/details/${anime.bangumiId}`);
+      const res = await fetch(`/api/anime/details/${bangumiId}`);
       const data = await res.json();
       if (res.ok && data.success && data.details) {
         setSelectedAnime(data.details);
-        setStep("subgroups");
+        setStep("anime_subgroups");
       } else {
         setError(data.error || "Failed to load fansub groups for this anime");
       }
@@ -218,7 +266,102 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     }
   };
 
-  // Handle selecting a Subgroup (1-Click or custom preset)
+  // Handle selecting a TV show (TMDB)
+  const handleSelectTvShow = async (tmdbId: number) => {
+    setLoadingDetails(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/media/details/${tmdbId}`);
+      const data = await res.json();
+      if (res.ok && data.success && data.details) {
+        setSelectedTvShow(data.details);
+        setStep("tv_seasons");
+      } else {
+        setError(data.error || "Failed to load TV show seasons");
+      }
+    } catch (err: any) {
+      console.error("Error loading TV show details:", err);
+      setError("Error loading show details: " + err.message);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  // Handle selecting a Season for a TV Show -> Load torrent episodes
+  const handleSelectSeason = async (season: TmdbSeason) => {
+    if (!selectedTvShow) return;
+    setSelectedSeason(season);
+    setLoadingEpisodes(true);
+    setError(null);
+
+    try {
+      const queryParams = new URLSearchParams({
+        tmdbId: String(selectedTvShow.id),
+        imdbId: selectedTvShow.imdbId || '',
+        showName: selectedTvShow.name,
+        originalName: selectedTvShow.originalName || '',
+        seasonNumber: String(season.seasonNumber),
+        showType: selectedTvShow.showType,
+        country: (selectedTvShow.country || []).join(',')
+      });
+
+      const res = await fetch(`/api/media/episodes?${queryParams.toString()}`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTvEpisodes(data.episodes || []);
+        setStep("tv_episodes");
+        if ((data.episodes || []).length === 0) {
+          setError(`No torrent releases found for Season ${season.seasonNumber}.`);
+        }
+      } else {
+        setError(data.error || "Failed to fetch episodes for this season");
+      }
+    } catch (err: any) {
+      console.error("Error loading TV season episodes:", err);
+      setError("Error fetching episodes: " + err.message);
+    } finally {
+      setLoadingEpisodes(false);
+    }
+  };
+
+  // 1-Click Track TV Show Season
+  const handleTrackTvSeason = async () => {
+    if (!selectedTvShow || !selectedSeason || tvEpisodes.length === 0) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/media/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          showName: selectedTvShow.name,
+          showType: selectedTvShow.showType,
+          seasonNumber: selectedSeason.seasonNumber,
+          posterUrl: selectedSeason.posterUrl || selectedTvShow.posterUrl,
+          selectedEpisodes: tvEpisodes
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onSuccess(`Tracked ${selectedTvShow.name} Season ${selectedSeason.seasonNumber}! Queued ${data.episodesQueued} episodes.`);
+        handleReset();
+        onClose();
+      } else {
+        setError(data.error || "Failed to track TV series");
+      }
+    } catch (err: any) {
+      console.error("Error tracking TV series:", err);
+      setError("Error connecting to server: " + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle selecting an Anime Subgroup (1-Click or custom preset)
   const handleSelectSubgroup = async (subgroup: SubgroupInfo, presetFilter: string = "") => {
     const targetUrl = subgroup.rssUrl;
     setRssUrl(targetUrl);
@@ -300,6 +443,9 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setRawItems([]);
     setSearchResults([]);
     setSelectedAnime(null);
+    setSelectedTvShow(null);
+    setSelectedSeason(null);
+    setTvEpisodes([]);
     setSearchQuery("");
     setFilterKeyword("");
     setStep("search");
@@ -320,11 +466,11 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
 
   return (
     <div className="modal-overlay" onMouseDown={handleOverlayMouseDown} onClick={handleOverlayClick}>
-      <div className="modal-content" style={{ maxWidth: "760px", width: "100%" }} onClick={e => e.stopPropagation()}>
+      <div className="modal-content" style={{ maxWidth: "780px", width: "100%" }} onClick={e => e.stopPropagation()}>
         <div className="modal-header" style={{ marginBottom: "14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <Sparkles size={20} style={{ color: "var(--primary)" }} />
-            <h2 className="modal-title" style={{ margin: 0 }}>Anime Tracker & RSS Auto-Download</h2>
+            <h2 className="modal-title" style={{ margin: 0 }}>Universal Media Tracker & Downloader</h2>
           </div>
           <button className="modal-close" onClick={onClose}>
             <X size={20} />
@@ -366,7 +512,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 transition: "all 0.2s"
               }}
             >
-              <Search size={15} /> Search & Auto-Subscribe
+              <Search size={15} /> Universal Search (TMDB + Mikan)
             </button>
             <button
               type="button"
@@ -416,9 +562,34 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 1: SEARCH ANIME TAB */}
+          {/* VIEW 1: UNIVERSAL SEARCH TAB */}
           {activeTab === "search" && step === "search" && (
             <div>
+              {/* Media Filter Pills */}
+              <div style={{ display: "flex", gap: "8px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Media Type:</span>
+                {(['all', 'anime', 'tv'] as const).map(f => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setMediaFilter(f)}
+                    style={{
+                      padding: "3px 10px",
+                      fontSize: "0.75rem",
+                      borderRadius: "14px",
+                      border: "1px solid",
+                      borderColor: mediaFilter === f ? "var(--primary)" : "var(--border-light)",
+                      background: mediaFilter === f ? "rgba(99, 102, 241, 0.2)" : "transparent",
+                      color: mediaFilter === f ? "var(--primary)" : "var(--text-muted)",
+                      cursor: "pointer",
+                      fontWeight: mediaFilter === f ? 600 : 400
+                    }}
+                  >
+                    {f === 'all' ? 'All' : f === 'anime' ? '🎌 Anime (动漫)' : '📺 TV Dramas (欧美/华语/韩剧)'}
+                  </button>
+                ))}
+              </div>
+
               <form onSubmit={handleSearch} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
                 <div style={{ position: "relative", flex: 1 }}>
                   <Search size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
@@ -426,7 +597,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                     type="text"
                     className="input-text"
                     style={{ width: "100%", paddingLeft: "36px" }}
-                    placeholder="Type anime title (e.g. 芙莉莲, 无职转生, 鬼灭之刃...)"
+                    placeholder="Search Anime, Chinese, Western, or Korean series (e.g. 怪奇物语, 庆余年, 芙莉莲)..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     autoFocus
@@ -440,7 +611,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
               {loadingDetails && (
                 <div style={{ padding: "30px", textAlign: "center", color: "var(--primary)" }}>
                   <RefreshCw size={24} className="spin" style={{ margin: "0 auto 10px" }} />
-                  <div>Loading fansub groups...</div>
+                  <div>Loading details & seasons...</div>
                 </div>
               )}
 
@@ -449,14 +620,20 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                   maxHeight: "360px",
                   overflowY: "auto",
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
                   gap: "12px",
                   paddingRight: "4px"
                 }}>
-                  {searchResults.map(anime => (
+                  {searchResults.map(item => (
                     <div
-                      key={anime.bangumiId}
-                      onClick={() => handleSelectAnime(anime)}
+                      key={item.id}
+                      onClick={() => {
+                        if (item.source === 'mikan' && item.bangumiId) {
+                          handleSelectAnime(item.bangumiId);
+                        } else if (item.tmdbId) {
+                          handleSelectTvShow(item.tmdbId);
+                        }
+                      }}
                       style={{
                         background: "var(--surface-hover)",
                         border: "1px solid var(--border-light)",
@@ -477,20 +654,44 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                         e.currentTarget.style.borderColor = "var(--border-light)";
                       }}
                     >
-                      <div style={{ width: "100%", height: "120px", borderRadius: "6px", overflow: "hidden", background: "#111" }}>
-                        {anime.poster ? (
-                          <img src={anime.poster} alt={anime.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <div style={{ width: "100%", height: "130px", borderRadius: "6px", overflow: "hidden", background: "#111", position: "relative" }}>
+                        {item.posterUrl ? (
+                          <img src={item.posterUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         ) : (
                           <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>
                             <Film size={28} />
                           </div>
                         )}
+                        <span style={{
+                          position: "absolute",
+                          top: "6px",
+                          right: "6px",
+                          background: item.showType === 'Anime' ? 'rgba(99, 102, 241, 0.85)' :
+                                      item.showType === 'Chinese' ? 'rgba(239, 68, 68, 0.85)' :
+                                      item.showType === 'Western' ? 'rgba(34, 197, 94, 0.85)' :
+                                      item.showType === 'Korean' ? 'rgba(234, 179, 8, 0.85)' :
+                                      'rgba(0,0,0,0.7)',
+                          color: "white",
+                          fontSize: "0.68rem",
+                          fontWeight: 600,
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          backdropFilter: "blur(4px)"
+                        }}>
+                          {item.showType}
+                        </span>
                       </div>
                       <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", lineClamp: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                        {anime.title}
+                        {item.name}
                       </div>
+                      {item.year && (
+                        <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                          {item.year} {item.originalName && item.originalName !== item.name ? `• ${item.originalName}` : ''}
+                        </div>
+                      )}
                       <div style={{ fontSize: "0.75rem", color: "var(--primary)", marginTop: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
-                        <Layers size={13} /> Select Subgroups &rarr;
+                        {item.source === 'mikan' ? <Layers size={13} /> : <Tv size={13} />}
+                        {item.source === 'mikan' ? 'Subgroups →' : 'Explore Seasons →'}
                       </div>
                     </div>
                   ))}
@@ -499,8 +700,188 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 2: SUBGROUP SELECTOR VIEW */}
-          {activeTab === "search" && step === "subgroups" && selectedAnime && (
+          {/* VIEW 2: TV SHOW SEASONS EXPLORER (TMDB) */}
+          {activeTab === "search" && step === "tv_seasons" && selectedTvShow && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px", borderBottom: "1px solid var(--border-light)", paddingBottom: "12px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setStep("search")}
+                  style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "4px" }}
+                >
+                  <ArrowLeft size={14} /> Back
+                </button>
+                <div>
+                  <span style={{ fontWeight: 600, fontSize: "0.95rem", color: "var(--text-main)", marginRight: "8px" }}>
+                    {selectedTvShow.name}
+                  </span>
+                  <span className="badge" style={{ background: "rgba(99, 102, 241, 0.2)", color: "var(--primary)", fontSize: "0.7rem", padding: "2px 6px" }}>
+                    {selectedTvShow.showType} TV
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "12px" }}>
+                Select a Season to track and download:
+              </div>
+
+              {loadingEpisodes ? (
+                <div style={{ padding: "30px", textAlign: "center", color: "var(--primary)" }}>
+                  <RefreshCw size={24} className="spin" style={{ margin: "0 auto 10px" }} />
+                  <div>Searching best 1080p/4K releases across multi-channel indexers...</div>
+                </div>
+              ) : (
+                <div style={{ maxHeight: "360px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {selectedTvShow.seasons.map(season => (
+                    <div
+                      key={season.id}
+                      onClick={() => handleSelectSeason(season)}
+                      style={{
+                        background: "var(--surface-hover)",
+                        border: "1px solid var(--border-light)",
+                        borderRadius: "10px",
+                        padding: "12px 14px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        cursor: "pointer",
+                        transition: "all 0.15s"
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = "var(--primary)"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border-light)"}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <div style={{ width: "40px", height: "55px", borderRadius: "4px", overflow: "hidden", background: "#111" }}>
+                          {season.posterUrl || selectedTvShow.posterUrl ? (
+                            <img src={season.posterUrl || selectedTvShow.posterUrl!} alt={season.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : (
+                            <Tv size={20} style={{ margin: "auto" }} />
+                          )}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-main)" }}>
+                            {season.name}
+                          </div>
+                          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", gap: "10px", marginTop: "2px" }}>
+                            <span>{season.episodeCount} Episodes</span>
+                            {season.airDate && <span>Aired: {season.airDate}</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <button type="button" className="btn btn-primary" style={{ padding: "4px 12px", fontSize: "0.78rem" }}>
+                        Select Season →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW 3: TV SHOW EPISODES PREVIEW & 1-CLICK TRACK */}
+          {activeTab === "search" && step === "tv_episodes" && selectedTvShow && selectedSeason && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setStep("tv_seasons")}
+                  style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "4px" }}
+                >
+                  <ArrowLeft size={14} /> Back
+                </button>
+                <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text-main)" }}>
+                  {selectedTvShow.name} • {selectedSeason.name}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "12px", padding: "10px 12px", background: "var(--surface-hover)", borderRadius: "8px", border: "1px solid var(--border-light)", fontSize: "0.78rem" }}>
+                <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <span style={{ color: "var(--text-muted)", marginRight: "6px" }}>Category:</span>
+                    <span style={{ fontWeight: 600, color: "var(--primary)" }}>TV/{selectedTvShow.showType}/{selectedTvShow.name}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: "var(--text-muted)", marginRight: "6px" }}>Auto Tags:</span>
+                    <span className="badge" style={{ background: "rgba(99, 102, 241, 0.2)", color: "#a5b4fc", border: "1px solid rgba(99, 102, 241, 0.4)", marginRight: "4px" }}>rss-auto</span>
+                    <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", border: "1px solid rgba(59, 130, 246, 0.4)" }}>media:tv</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "14px" }}>
+                <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Found {tvEpisodes.length} Episodes for Season {selectedSeason.seasonNumber}</span>
+                  <span style={{ fontSize: "0.75rem", color: "#4ade80", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <Zap size={12} /> 1080p Fast Direct-Play Filtered
+                  </span>
+                </div>
+
+                <div style={{ maxHeight: "240px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
+                  {tvEpisodes.length === 0 ? (
+                    <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
+                      No episodes found for this season.
+                    </div>
+                  ) : (
+                    tvEpisodes.map(ep => (
+                      <div key={ep.episodeNum} style={{
+                        padding: "8px 10px",
+                        borderBottom: "1px solid var(--border-light)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "0.82rem"
+                      }}>
+                        <div>
+                          <span style={{ fontWeight: 600, color: "var(--text-main)", marginRight: "8px" }}>
+                            {ep.cleanEpisodeName}
+                          </span>
+                          {ep.is1080p && (
+                            <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.7rem", padding: "1px 6px", marginRight: "4px" }}>
+                              1080p
+                            </span>
+                          )}
+                          {ep.isH264 && (
+                            <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.7rem", padding: "1px 6px" }}>
+                              H.264 MP4
+                            </span>
+                          )}
+                        </div>
+                        <span style={{ fontSize: "0.72rem", color: "var(--text-dim)", maxWidth: "260px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
+                          {ep.rawTitle}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
+                <button type="button" className="btn btn-secondary" onClick={onClose}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleTrackTvSeason}
+                  disabled={submitting || tvEpisodes.length === 0}
+                >
+                  {submitting ? (
+                    <>
+                      <RefreshCw size={14} className="spin" /> Sending to qBittorrent...
+                    </>
+                  ) : (
+                    `🚀 1-Click Track Season ${selectedSeason.seasonNumber} (${tvEpisodes.length} Episodes)`
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW 4: ANIME SUBGROUP SELECTOR VIEW (Mikan) */}
+          {activeTab === "search" && step === "anime_subgroups" && selectedAnime && (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px", borderBottom: "1px solid var(--border-light)", paddingBottom: "12px" }}>
                 <button
@@ -609,11 +990,11 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 3: DIRECT CUSTOM RSS URL TAB */}
+          {/* VIEW 5: DIRECT CUSTOM RSS URL TAB */}
           {activeTab === "direct" && step === "direct_input" && (
             <form onSubmit={(e) => { e.preventDefault(); loadRssPreview(rssUrl); }}>
               <div className="form-group">
-                <label className="form-label">Mikan / Anime RSS Feed URL</label>
+                <label className="form-label">Mikan / Anime / Drama RSS Feed URL</label>
                 <input
                   type="url"
                   className="form-input"
@@ -644,14 +1025,14 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </form>
           )}
 
-          {/* VIEW 4: STEP 2 CONFIRMATION & PAST EPISODES PREVIEW */}
+          {/* VIEW 6: STEP 2 CONFIRMATION & PAST EPISODES PREVIEW */}
           {step === "preview" && (
             <form onSubmit={handleSubscribe}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => setStep(activeTab === "search" ? "subgroups" : "direct_input")}
+                  onClick={() => setStep(activeTab === "search" ? "anime_subgroups" : "direct_input")}
                   style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "4px" }}
                 >
                   <ArrowLeft size={14} /> Back

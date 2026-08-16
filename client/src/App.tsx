@@ -270,6 +270,7 @@ export default function App() {
     retentionHours?: number;
     ratioLimit?: number;
     deleteOnIngest?: boolean;
+    tmdbApiKey?: string;
   }): Promise<boolean> => {
     try {
       const payload = { videoDir, ...qbConfig };

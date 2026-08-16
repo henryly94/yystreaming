@@ -15,6 +15,7 @@ interface Settings {
   retentionHours?: number;
   ratioLimit?: number;
   deleteOnIngest?: boolean;
+  tmdbApiKey?: string;
 }
 
 interface SettingsModalProps {
@@ -30,6 +31,7 @@ interface SettingsModalProps {
     retentionHours?: number;
     ratioLimit?: number;
     deleteOnIngest?: boolean;
+    tmdbApiKey?: string;
   }) => Promise<boolean>;
   onRescan: () => Promise<void>;
   currentSettings: Settings | null;
@@ -52,6 +54,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [retentionHours, setRetentionHours] = useState(72);
   const [ratioLimit, setRatioLimit] = useState(1.5);
   const [deleteOnIngest, setDeleteOnIngest] = useState(false);
+  const [tmdbApiKey, setTmdbApiKey] = useState('');
   const [testStatus, setTestStatus] = useState<{ loading: boolean; success?: boolean; msg: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRescanning, setIsRescanning] = useState(false);
@@ -131,6 +134,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (currentSettings.retentionHours !== undefined) setRetentionHours(currentSettings.retentionHours);
       if (currentSettings.ratioLimit !== undefined) setRatioLimit(currentSettings.ratioLimit);
       if (currentSettings.deleteOnIngest !== undefined) setDeleteOnIngest(currentSettings.deleteOnIngest);
+      if (currentSettings.tmdbApiKey) setTmdbApiKey(currentSettings.tmdbApiKey);
     }
   }, [currentSettings, isOpen]);
 
@@ -173,7 +177,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       autoRemoveTorrents,
       retentionHours,
       ratioLimit,
-      deleteOnIngest
+      deleteOnIngest,
+      tmdbApiKey: tmdbApiKey.trim()
     });
     setIsSaving(false);
     if (success) {
@@ -236,6 +241,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
               Provide the absolute path to the directory containing your video folders.
+            </span>
+          </div>
+
+          <div className="form-group" style={{ marginTop: '16px' }}>
+            <label className="form-label" htmlFor="tmdb-key">TheMovieDB (TMDB) API Key (Optional)</label>
+            <input
+              id="tmdb-key"
+              type="text"
+              className="input-text"
+              value={tmdbApiKey}
+              onChange={(e) => setTmdbApiKey(e.target.value)}
+              placeholder="Leave empty to use built-in free API key"
+            />
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Used for TV shows (Chinese/Western/Korean) metadata and poster scraping. A default free key is provided if left empty.
             </span>
           </div>
 

@@ -8,6 +8,8 @@ import { execSync, spawn } from 'child_process';
 import { cleanShowName, deduplicateAndFilterRssItems } from './rss_parser.js';
 import { QBittorrentClient } from './qbittorrent.js';
 import { searchMikanAnime, getMikanBangumiDetails } from './mikan_search.js';
+import { searchTmdb, getTmdbShowDetails } from './tmdb.js';
+import { searchUniversalMediaTorrents } from './tv_search.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,7 +94,8 @@ const DEFAULT_PORT = 5001;
 function getSettings() {
   let settings = {
     videoDir: '',
-    port: DEFAULT_PORT
+    port: DEFAULT_PORT,
+    tmdbApiKey: ''
   };
 
   try {
@@ -1013,6 +1016,196 @@ function parseXmlRssItems(xmlText) {
 
   return { rawChannelTitle, items };
 }
+
+// Universal Media Search (TMDB + Mikan)
+app.get('/api/media/search', async (req, res) => {
+  const query = req.query.q || '';
+  const type = req.query.type || 'all'; // 'all' | 'anime' | 'tv'
+  if (!query.trim()) {
+    return res.json({ success: true, count: 0, results: [] });
+  }
+
+  const settings = getSettings();
+
+  try {
+    const results = [];
+
+    // 1. Search Anime via Mikan if type is 'all' or 'anime'
+    if (type === 'all' || type === 'anime') {
+      const animeResults = await searchMikanAnime(query.trim());
+      animeResults.forEach(a => {
+        results.push({
+          id: `mikan_${a.bangumiId}`,
+          source: 'mikan',
+          mediaType: 'anime',
+          showType: 'Anime',
+          name: a.title,
+          originalName: a.title,
+          bangumiId: a.bangumiId,
+          posterUrl: a.poster,
+          year: ''
+        });
+      });
+    }
+
+    // 2. Search TMDB if type is 'all' or 'tv'
+    if (type === 'all' || type === 'tv') {
+      const tmdbResults = await searchTmdb(query.trim(), settings.tmdbApiKey);
+      tmdbResults.forEach(t => {
+        results.push({
+          id: `tmdb_${t.id}`,
+          source: 'tmdb',
+          mediaType: t.mediaType,
+          showType: t.showType,
+          name: t.name,
+          originalName: t.originalName,
+          tmdbId: t.id,
+          posterUrl: t.posterUrl,
+          backdropUrl: t.backdropUrl,
+          year: t.year,
+          country: t.country,
+          overview: t.overview
+        });
+      });
+    }
+
+    return res.json({ success: true, count: results.length, results });
+  } catch (err) {
+    console.error('Error in /api/media/search:', err);
+    return res.status(500).json({ error: 'Search failed: ' + err.message });
+  }
+});
+
+// Fetch detailed seasons & info for a TMDB show
+app.get('/api/media/details/:tmdbId', async (req, res) => {
+  const { tmdbId } = req.params;
+  if (!tmdbId) {
+    return res.status(400).json({ error: 'tmdbId is required' });
+  }
+
+  const settings = getSettings();
+  try {
+    const details = await getTmdbShowDetails(tmdbId, settings.tmdbApiKey);
+    if (!details) {
+      return res.status(404).json({ error: 'Show details not found' });
+    }
+    return res.json({ success: true, details });
+  } catch (err) {
+    console.error('Error in /api/media/details:', err);
+    return res.status(500).json({ error: 'Failed to fetch details: ' + err.message });
+  }
+});
+
+// Fetch torrent episodes for a specific TMDB show season
+app.get('/api/media/episodes', async (req, res) => {
+  const { imdbId, showName, originalName, seasonNumber, showType, country } = req.query;
+
+  try {
+    const parsedSeason = parseInt(seasonNumber, 10) || 1;
+    const countryArr = country ? String(country).split(',') : [];
+
+    const result = await searchUniversalMediaTorrents({
+      imdbId,
+      showName,
+      originalName,
+      seasonNumber: parsedSeason,
+      showType,
+      country: countryArr
+    });
+
+    return res.json(result);
+  } catch (err) {
+    console.error('Error in /api/media/episodes:', err);
+    return res.status(500).json({ error: 'Failed to fetch episodes: ' + err.message });
+  }
+});
+
+// Universal Media Tracker Subscription endpoint (TMDB TV shows & Anime)
+app.post('/api/media/subscribe', async (req, res) => {
+  const {
+    showName,
+    showType = 'TV',
+    seasonNumber = 1,
+    posterUrl,
+    selectedEpisodes = []
+  } = req.body;
+
+  if (!showName || selectedEpisodes.length === 0) {
+    return res.status(400).json({ error: 'Show name and episodes are required' });
+  }
+
+  const settings = getSettings();
+  const cleanTitle = cleanShowName(showName);
+  const seasonSuffix = seasonNumber > 1 ? ` S0${seasonNumber}` : '';
+  const finalFolder = `${cleanTitle}${seasonSuffix}`;
+
+  // 1. Structure hierarchical category: TV/Chinese/<Show>, TV/Western/<Show>, etc.
+  let category = 'TV';
+  if (showType === 'Chinese') category = `TV/Chinese/${cleanTitle}`;
+  else if (showType === 'Western') category = `TV/Western/${cleanTitle}`;
+  else if (showType === 'Korean') category = `TV/Korean/${cleanTitle}`;
+  else if (showType === 'Japanese') category = `TV/Japanese/${cleanTitle}`;
+  else if (showType === 'Anime') category = `Anime/${cleanTitle}`;
+  else category = `TV/${cleanTitle}`;
+
+  // 2. Resolve save path
+  const hostSavePath = path.join(settings.videoDir, finalFolder);
+  if (!fs.existsSync(hostSavePath)) {
+    try {
+      fs.mkdirSync(hostSavePath, { recursive: true });
+    } catch (e) {}
+  }
+
+  // 3. Save poster image to directory if provided
+  if (posterUrl) {
+    try {
+      const posterPath = path.join(hostSavePath, 'poster.jpg');
+      if (!fs.existsSync(posterPath)) {
+        const imgRes = await fetch(posterUrl);
+        if (imgRes.ok) {
+          const buffer = await imgRes.arrayBuffer();
+          fs.writeFileSync(posterPath, Buffer.from(buffer));
+          console.log(`[Media Subscribe]: Saved official poster to ${posterPath}`);
+        }
+      }
+    } catch (err) {
+      console.warn('[Media Subscribe]: Could not download poster:', err.message);
+    }
+  }
+
+  // 4. Create category & add torrents in qBittorrent
+  const qbClient = getQbClient(settings);
+  if (qbClient) {
+    try {
+      const qbSavePath = getQbSavePath(hostSavePath, settings);
+      await qbClient.createCategory({ category, savePath: qbSavePath });
+
+      // Add tags: rss-auto, media:tv, status:airing, season:2026-Qx
+      const currentYear = new Date().getFullYear();
+      const currentQuarter = Math.floor((new Date().getMonth() + 3) / 3);
+      const tags = `rss-auto,media:tv,status:airing,season:${currentYear}-Q${currentQuarter}`;
+
+      const torrentUrls = selectedEpisodes.map(ep => ep.downloadUrl).filter(Boolean);
+      if (torrentUrls.length > 0) {
+        await qbClient.addTorrents({
+          urls: torrentUrls,
+          savePath: qbSavePath,
+          category,
+          tags
+        });
+      }
+    } catch (err) {
+      console.error('[Media Subscribe]: Error pushing to qBittorrent:', err);
+    }
+  }
+
+  return res.json({
+    success: true,
+    showName: cleanTitle,
+    category,
+    episodesQueued: selectedEpisodes.length
+  });
+});
 
 // Search anime on Mikan Project
 app.get('/api/anime/search', async (req, res) => {
