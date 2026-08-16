@@ -7,6 +7,7 @@ interface ParsedEpisode {
   cleanEpisodeName: string;
   isH264: boolean;
   is1080p: boolean;
+  is720p?: boolean;
   downloadUrl: string;
   allReleasesCount?: number;
   seasonNumber?: number;
@@ -819,41 +820,64 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                   </span>
                 </div>
 
-                <div style={{ maxHeight: "240px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
+                <div style={{ maxHeight: "260px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
                   {tvEpisodes.length === 0 ? (
                     <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
                       No episodes found for this season.
                     </div>
                   ) : (
-                    tvEpisodes.map(ep => (
-                      <div key={ep.episodeNum} style={{
-                        padding: "8px 10px",
-                        borderBottom: "1px solid var(--border-light)",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        fontSize: "0.82rem"
-                      }}>
-                        <div>
-                          <span style={{ fontWeight: 600, color: "var(--text-main)", marginRight: "8px" }}>
-                            {ep.cleanEpisodeName}
-                          </span>
-                          {ep.is1080p && (
-                            <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.7rem", padding: "1px 6px", marginRight: "4px" }}>
-                              1080p
-                            </span>
-                          )}
-                          {ep.isH264 && (
-                            <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.7rem", padding: "1px 6px" }}>
-                              H.264 MP4
-                            </span>
-                          )}
+                    tvEpisodes.map(ep => {
+                      const isPack = ep.episodeNum === 'Season_Pack';
+                      return (
+                        <div key={ep.episodeNum} style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid var(--border-light)",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          fontSize: "0.82rem",
+                          background: isPack ? "rgba(99, 102, 241, 0.1)" : "transparent",
+                          borderRadius: isPack ? "6px" : "0",
+                          marginBottom: isPack ? "6px" : "0"
+                        }}>
+                          <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px" }}>
+                              <span style={{ fontWeight: 600, color: isPack ? "var(--primary)" : "var(--text-main)" }}>
+                                {isPack ? `📦 ${ep.cleanEpisodeName}` : ep.cleanEpisodeName}
+                              </span>
+                              {ep.is1080p && (
+                                <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                  1080p
+                                </span>
+                              )}
+                              {ep.is720p && (
+                                <span className="badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                  720p
+                                </span>
+                              )}
+                              {/2160p|4k/i.test(ep.rawTitle) && (
+                                <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                  4K UHD
+                                </span>
+                              )}
+                              {ep.isH264 && (
+                                <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                  H.264
+                                </span>
+                              )}
+                              {ep.sizeMb && ep.sizeMb !== '0' && (
+                                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginLeft: "4px" }}>
+                                  ({parseFloat(ep.sizeMb) > 1024 ? `${(parseFloat(ep.sizeMb)/1024).toFixed(1)} GB` : `${Math.round(parseFloat(ep.sizeMb))} MB`})
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", maxWidth: "340px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
+                              {ep.rawTitle}
+                            </div>
+                          </div>
                         </div>
-                        <span style={{ fontSize: "0.72rem", color: "var(--text-dim)", maxWidth: "260px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
-                          {ep.rawTitle}
-                        </span>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

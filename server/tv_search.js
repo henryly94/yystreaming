@@ -121,10 +121,21 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
   const selected = [];
   for (const [epNum, list] of grouped.entries()) {
     list.sort((a, b) => {
-      // Prioritize 1080p, then H.264, then seeds
-      if (a.is1080p !== b.is1080p) return a.is1080p ? -1 : 1;
-      if (a.isH264 !== b.isH264) return a.isH264 ? -1 : 1;
-      return b.seeds - a.seeds;
+      // Score: 1080p > 720p > 480p > 4K (4K deprioritized to prevent massive 6GB single episode downloads)
+      const getScore = (item) => {
+        let score = 0;
+        if (item.is1080p) score = 100;
+        else if (item.is720p) score = 80;
+        else if (/480p/i.test(item.rawTitle)) score = 50;
+        else if (/2160p|4k/i.test(item.rawTitle)) score = 30; // 4K only as fallback
+        else score = 60;
+
+        if (item.isH264) score += 10;
+        score += Math.min(item.seeds || 0, 30);
+        return score;
+      };
+
+      return getScore(b) - getScore(a);
     });
     selected.push(list[0]);
   }
