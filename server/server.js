@@ -144,6 +144,15 @@ function getSafePath(videoDir, relPath) {
   return resolvedTarget;
 }
 
+// Helper to translate host showDir to qBittorrent Docker container path
+function getQbSavePath(showDir, settings) {
+  if (settings && settings.qbPathPrefix && settings.videoDir) {
+    const rel = path.relative(settings.videoDir, showDir);
+    return path.posix.join(settings.qbPathPrefix.trim(), rel.replace(/\\/g, '/'));
+  }
+  return showDir;
+}
+
 // Find local network IP addresses
 function getLocalIps() {
   const interfaces = os.networkInterfaces();
@@ -1308,15 +1317,7 @@ app.post('/api/rss/subscribe', async (req, res) => {
       console.error('Non-blocking Mikan cover download failed:', err.message);
     });
 
-    // Helper to translate host targetShowDir to qBittorrent Docker container path
-    const getQbSavePath = (showDir) => {
-      if (settings.qbPathPrefix && settings.videoDir) {
-        const rel = path.relative(settings.videoDir, showDir);
-        return path.posix.join(settings.qbPathPrefix.trim(), rel.replace(/\\/g, '/'));
-      }
-      return showDir;
-    };
-    const qbSavePath = getQbSavePath(targetShowDir);
+    const qbSavePath = getQbSavePath(targetShowDir, settings);
     // Compute structured Category & Season Tags
     const categoryName = `Anime/${showName}`;
     const now = new Date();
