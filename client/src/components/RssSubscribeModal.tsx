@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from "react";
-import { X, Rss, Search, Sparkles, Film, ArrowLeft, Zap, AlertCircle, RefreshCw, Layers, Tv } from "lucide-react";
+import { X, Rss, Search, Sparkles, Film, ArrowLeft, Zap, AlertCircle, RefreshCw, Layers, Tv, Star, Clock, DownloadCloud } from "lucide-react";
 
 interface ParsedEpisode {
   rawTitle: string;
@@ -19,7 +19,7 @@ interface UniversalSearchResult {
   id: string;
   source: 'mikan' | 'tmdb';
   mediaType: 'anime' | 'tv' | 'movie';
-  showType: 'Anime' | 'Chinese' | 'Western' | 'Korean' | 'Japanese' | 'TV';
+  showType: 'Anime' | 'Chinese' | 'Western' | 'Korean' | 'Japanese' | 'TV' | 'Movie';
   name: string;
   originalName: string;
   bangumiId?: string;
@@ -76,6 +76,38 @@ interface TmdbShowDetails {
   seasons: TmdbSeason[];
 }
 
+interface MovieRelease {
+  name: string;
+  quality: string;
+  type: string;
+  is1080p: boolean;
+  is720p: boolean;
+  is4k: boolean;
+  isH264: boolean;
+  size: string;
+  sizeBytes?: number;
+  seeds: number;
+  peers: number;
+  downloadUrl: string;
+  source: string;
+}
+
+interface TmdbMovieDetails {
+  id: number;
+  mediaType: 'movie';
+  showType: 'Movie';
+  name: string;
+  originalName: string;
+  imdbId: string | null;
+  overview: string;
+  runtime: number;
+  releaseDate: string;
+  year: string;
+  voteAverage: number;
+  posterUrl: string | null;
+  backdropUrl: string | null;
+}
+
 interface RssSubscribeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -89,18 +121,20 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
 }) => {
   // Mode & navigation state
   const [activeTab, setActiveTab] = useState<"search" | "direct">("search");
-  const [step, setStep] = useState<"search" | "anime_subgroups" | "tv_seasons" | "tv_episodes" | "direct_input" | "preview">("search");
-  const [mediaFilter, setMediaFilter] = useState<"all" | "anime" | "tv">("all");
+  const [step, setStep] = useState<"search" | "anime_subgroups" | "tv_seasons" | "tv_episodes" | "movie_details" | "direct_input" | "preview">("search");
+  const [mediaFilter, setMediaFilter] = useState<"all" | "movie" | "tv" | "anime">("all");
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<UniversalSearchResult[]>([]);
   
-  // Selected Anime / TV Show
+  // Selected Anime / TV Show / Movie
   const [selectedAnime, setSelectedAnime] = useState<AnimeDetails | null>(null);
   const [selectedTvShow, setSelectedTvShow] = useState<TmdbShowDetails | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<TmdbSeason | null>(null);
+  const [selectedMovie, setSelectedMovie] = useState<TmdbMovieDetails | null>(null);
+  const [movieReleases, setMovieReleases] = useState<MovieRelease[]>([]);
   const [tvEpisodes, setTvEpisodes] = useState<ParsedEpisode[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
@@ -135,7 +169,6 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       });
     }
 
-    // 1. Filter raw items first by filterKeyword
     const matchedRaw = rawItems.filter(item => {
       if (!kw) return true;
       const title = item.title || "";
@@ -145,7 +178,6 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       return kw.split(/\s+/).filter(Boolean).every(k => title.toLowerCase().includes(k.toLowerCase()));
     });
 
-    // 2. Parse & group by episodeNum
     const grouped = new Map<string, ParsedEpisode[]>();
     for (const item of matchedRaw) {
       const rawTitle = item.title || "";
@@ -191,6 +223,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
         cleanEpisodeName: `Episode ${epNum}`,
         isH264: /H\.?264|AVC/i.test(rawTitle),
         is1080p: /1080p|1920x1080/i.test(rawTitle),
+        is720p: /720p/i.test(rawTitle),
         downloadUrl: item.enclosure?.url || item.link || "",
         allReleasesCount: 1
       };
@@ -199,7 +232,6 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       grouped.get(epNum)!.push(parsed);
     }
 
-    // 3. Pick 1 best per episode number
     const selected: ParsedEpisode[] = [];
     for (const items of grouped.values()) {
       items.sort((a: ParsedEpisode, b: ParsedEpisode) => {
@@ -225,6 +257,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setError(null);
     setSelectedAnime(null);
     setSelectedTvShow(null);
+    setSelectedMovie(null);
 
     try {
       const res = await fetch(`/api/media/search?q=${encodeURIComponent(searchQuery.trim())}&type=${mediaFilter}`);
@@ -232,7 +265,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       if (res.ok && data.success) {
         setSearchResults(data.results || []);
         if (data.results.length === 0) {
-          setError(`No TV shows or Anime found for "${searchQuery.trim()}". Try simplifying your keywords.`);
+          setError(`No Media found for "${searchQuery.trim()}". Try simplifying your keywords.`);
         }
       } else {
         setError(data.error || "Search failed");
@@ -273,7 +306,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setError(null);
 
     try {
-      const res = await fetch(`/api/media/details/${tmdbId}`);
+      const res = await fetch(`/api/media/details/${tmdbId}?mediaType=tv`);
       const data = await res.json();
       if (res.ok && data.success && data.details) {
         setSelectedTvShow(data.details);
@@ -286,6 +319,82 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       setError("Error loading show details: " + err.message);
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  // Handle selecting a Movie (TMDB + YTS)
+  const handleSelectMovie = async (tmdbId: number) => {
+    setLoadingDetails(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/media/details/${tmdbId}?mediaType=movie`);
+      const data = await res.json();
+      if (res.ok && data.success && data.details) {
+        setSelectedMovie(data.details);
+        setStep("movie_details");
+
+        // Query movie torrent releases
+        const qParams = new URLSearchParams({
+          imdbId: data.details.imdbId || '',
+          title: data.details.name,
+          originalTitle: data.details.originalName || '',
+          year: data.details.year || ''
+        });
+
+        const relRes = await fetch(`/api/media/movie-releases?${qParams.toString()}`);
+        const relData = await relRes.json();
+        if (relRes.ok && relData.success) {
+          setMovieReleases(relData.releases || []);
+          if ((relData.releases || []).length === 0) {
+            setError("No direct torrent releases found for this movie.");
+          }
+        }
+      } else {
+        setError(data.error || "Failed to load movie details");
+      }
+    } catch (err: any) {
+      console.error("Error loading movie details:", err);
+      setError("Error loading movie details: " + err.message);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  // 1-Click Track Movie
+  const handleTrackMovie = async (release: MovieRelease) => {
+    if (!selectedMovie || !release.downloadUrl) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/media/subscribe-movie", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: selectedMovie.name,
+          originalTitle: selectedMovie.originalName,
+          year: selectedMovie.year,
+          posterUrl: selectedMovie.posterUrl,
+          downloadUrl: release.downloadUrl,
+          quality: release.quality
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onSuccess(`Added ${selectedMovie.name} (${release.quality}) to qBittorrent!`);
+        handleReset();
+        onClose();
+      } else {
+        setError(data.error || "Failed to add movie to qBittorrent");
+      }
+    } catch (err: any) {
+      console.error("Error subscribing movie:", err);
+      setError("Error connecting to server: " + err.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -449,6 +558,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
     setSelectedAnime(null);
     setSelectedTvShow(null);
     setSelectedSeason(null);
+    setSelectedMovie(null);
+    setMovieReleases([]);
     setTvEpisodes([]);
     setSearchQuery("");
     setFilterKeyword("");
@@ -572,24 +683,29 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
               {/* Media Filter Pills */}
               <div style={{ display: "flex", gap: "8px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Media Type:</span>
-                {(['all', 'anime', 'tv'] as const).map(f => (
+                {([
+                  { key: 'all', label: 'All' },
+                  { key: 'movie', label: '🎬 Movies (电影)' },
+                  { key: 'tv', label: '📺 TV Dramas (剧集)' },
+                  { key: 'anime', label: '🎌 Anime (动漫)' }
+                ] as const).map(f => (
                   <button
-                    key={f}
+                    key={f.key}
                     type="button"
-                    onClick={() => setMediaFilter(f)}
+                    onClick={() => setMediaFilter(f.key)}
                     style={{
                       padding: "3px 10px",
                       fontSize: "0.75rem",
                       borderRadius: "14px",
                       border: "1px solid",
-                      borderColor: mediaFilter === f ? "var(--primary)" : "var(--border-light)",
-                      background: mediaFilter === f ? "rgba(99, 102, 241, 0.2)" : "transparent",
-                      color: mediaFilter === f ? "var(--primary)" : "var(--text-muted)",
+                      borderColor: mediaFilter === f.key ? "var(--primary)" : "var(--border-light)",
+                      background: mediaFilter === f.key ? "rgba(99, 102, 241, 0.2)" : "transparent",
+                      color: mediaFilter === f.key ? "var(--primary)" : "var(--text-muted)",
                       cursor: "pointer",
-                      fontWeight: mediaFilter === f ? 600 : 400
+                      fontWeight: mediaFilter === f.key ? 600 : 400
                     }}
                   >
-                    {f === 'all' ? 'All' : f === 'anime' ? '🎌 Anime (动漫)' : '📺 TV Dramas (欧美/华语/韩剧)'}
+                    {f.label}
                   </button>
                 ))}
               </div>
@@ -601,7 +717,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                     type="text"
                     className="input-text"
                     style={{ width: "100%", paddingLeft: "36px" }}
-                    placeholder="Search Anime, Chinese, Western, or Korean series (e.g. 怪奇物语, 庆余年, 芙莉莲)..."
+                    placeholder="Search Movies, Anime, Chinese, Western, or Korean series (e.g. 007, 肖申克的救赎, 怪奇物语)..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     autoFocus
@@ -615,7 +731,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
               {loadingDetails && (
                 <div style={{ padding: "30px", textAlign: "center", color: "var(--primary)" }}>
                   <RefreshCw size={24} className="spin" style={{ margin: "0 auto 10px" }} />
-                  <div>Loading details & seasons...</div>
+                  <div>Loading details & releases...</div>
                 </div>
               )}
 
@@ -634,6 +750,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                       onClick={() => {
                         if (item.source === 'mikan' && item.bangumiId) {
                           handleSelectAnime(item.bangumiId);
+                        } else if (item.mediaType === 'movie' && item.tmdbId) {
+                          handleSelectMovie(item.tmdbId);
                         } else if (item.tmdbId) {
                           handleSelectTvShow(item.tmdbId);
                         }
@@ -670,7 +788,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                           position: "absolute",
                           top: "6px",
                           right: "6px",
-                          background: item.showType === 'Anime' ? 'rgba(99, 102, 241, 0.85)' :
+                          background: item.mediaType === 'movie' ? 'rgba(236, 72, 153, 0.85)' :
+                                      item.showType === 'Anime' ? 'rgba(99, 102, 241, 0.85)' :
                                       item.showType === 'Chinese' ? 'rgba(239, 68, 68, 0.85)' :
                                       item.showType === 'Western' ? 'rgba(34, 197, 94, 0.85)' :
                                       item.showType === 'Korean' ? 'rgba(234, 179, 8, 0.85)' :
@@ -682,7 +801,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                           borderRadius: "4px",
                           backdropFilter: "blur(4px)"
                         }}>
-                          {item.showType}
+                          {item.mediaType === 'movie' ? '🎬 Movie' : item.showType}
                         </span>
                       </div>
                       <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", lineClamp: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
@@ -694,8 +813,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                         </div>
                       )}
                       <div style={{ fontSize: "0.75rem", color: "var(--primary)", marginTop: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
-                        {item.source === 'mikan' ? <Layers size={13} /> : <Tv size={13} />}
-                        {item.source === 'mikan' ? 'Subgroups →' : 'Explore Seasons →'}
+                        {item.source === 'mikan' ? <Layers size={13} /> : item.mediaType === 'movie' ? <Film size={13} /> : <Tv size={13} />}
+                        {item.source === 'mikan' ? 'Subgroups →' : item.mediaType === 'movie' ? 'View Releases →' : 'Explore Seasons →'}
                       </div>
                     </div>
                   ))}
@@ -704,7 +823,138 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 2: TV SHOW SEASONS EXPLORER (TMDB) */}
+          {/* VIEW 2: MOVIE DETAILS & QUALITY SELECTOR */}
+          {activeTab === "search" && step === "movie_details" && selectedMovie && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px", borderBottom: "1px solid var(--border-light)", paddingBottom: "12px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setStep("search")}
+                  style={{ padding: "4px 8px", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "4px" }}
+                >
+                  <ArrowLeft size={14} /> Back
+                </button>
+                <div>
+                  <span style={{ fontWeight: 600, fontSize: "0.95rem", color: "var(--text-main)", marginRight: "8px" }}>
+                    {selectedMovie.name}
+                  </span>
+                  <span className="badge" style={{ background: "rgba(236, 72, 153, 0.2)", color: "#f472b6", fontSize: "0.7rem", padding: "2px 6px" }}>
+                    🎬 Movie ({selectedMovie.year})
+                  </span>
+                </div>
+              </div>
+
+              {/* Movie Header Card */}
+              <div style={{ display: "flex", gap: "14px", background: "var(--surface-hover)", borderRadius: "10px", padding: "12px", marginBottom: "16px", border: "1px solid var(--border-light)" }}>
+                <div style={{ width: "70px", height: "100px", borderRadius: "6px", overflow: "hidden", background: "#111", flexShrink: 0 }}>
+                  {selectedMovie.posterUrl ? (
+                    <img src={selectedMovie.posterUrl} alt={selectedMovie.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <Film size={24} style={{ margin: "auto" }} />
+                  )}
+                </div>
+                <div style={{ flex: 1, fontSize: "0.8rem" }}>
+                  <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "4px" }}>
+                    {selectedMovie.name} {selectedMovie.originalName && selectedMovie.originalName !== selectedMovie.name ? <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>({selectedMovie.originalName})</span> : ''}
+                  </div>
+                  <div style={{ display: "flex", gap: "12px", color: "var(--text-muted)", fontSize: "0.75rem", marginBottom: "6px", alignItems: "center" }}>
+                    {selectedMovie.voteAverage > 0 && (
+                      <span style={{ display: "flex", alignItems: "center", gap: "2px", color: "#f59e0b", fontWeight: 600 }}>
+                        <Star size={13} fill="#f59e0b" /> {selectedMovie.voteAverage.toFixed(1)}
+                      </span>
+                    )}
+                    {selectedMovie.runtime > 0 && (
+                      <span style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                        <Clock size={13} /> {selectedMovie.runtime} mins
+                      </span>
+                    )}
+                    {selectedMovie.year && <span>{selectedMovie.year}</span>}
+                  </div>
+                  <div style={{ color: "var(--text-dim)", lineClamp: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: "0.75rem" }}>
+                    {selectedMovie.overview || "No overview available."}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Available Quality Releases ({movieReleases.length})</span>
+                <span style={{ fontSize: "0.75rem", color: "#4ade80", display: "flex", alignItems: "center", gap: "4px" }}>
+                  <Zap size={12} /> YTS High-Speed Direct-Play Verified
+                </span>
+              </div>
+
+              {movieReleases.length === 0 ? (
+                <div style={{ padding: "30px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
+                  No torrent releases found for this movie.
+                </div>
+              ) : (
+                <div style={{ maxHeight: "240px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {movieReleases.map((rel, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        background: "var(--surface-hover)",
+                        border: "1px solid var(--border-light)",
+                        borderRadius: "8px",
+                        padding: "10px 14px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+                          <span style={{ fontWeight: 600, color: "var(--text-main)", fontSize: "0.88rem" }}>
+                            {rel.quality} {rel.type}
+                          </span>
+                          {rel.is1080p && (
+                            <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.7rem", padding: "1px 6px" }}>
+                              1080p BluRay
+                            </span>
+                          )}
+                          {rel.is720p && (
+                            <span className="badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", fontSize: "0.7rem", padding: "1px 6px" }}>
+                              720p
+                            </span>
+                          )}
+                          {rel.is4k && (
+                            <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.7rem", padding: "1px 6px" }}>
+                              4K UHD
+                            </span>
+                          )}
+                          {rel.isH264 && (
+                            <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.7rem", padding: "1px 6px" }}>
+                              H.264 MP4
+                            </span>
+                          )}
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                            ({rel.size})
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", maxWidth: "380px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={rel.name}>
+                          {rel.name}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => handleTrackMovie(rel)}
+                        disabled={submitting}
+                        style={{ padding: "5px 12px", fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "6px" }}
+                      >
+                        {submitting ? <RefreshCw size={13} className="spin" /> : <DownloadCloud size={14} />}
+                        1-Click Download
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW 3: TV SHOW SEASONS EXPLORER (TMDB) */}
           {activeTab === "search" && step === "tv_seasons" && selectedTvShow && (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px", borderBottom: "1px solid var(--border-light)", paddingBottom: "12px" }}>
@@ -784,7 +1034,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 3: TV SHOW EPISODES PREVIEW & 1-CLICK TRACK */}
+          {/* VIEW 4: TV SHOW EPISODES PREVIEW & 1-CLICK TRACK */}
           {activeTab === "search" && step === "tv_episodes" && selectedTvShow && selectedSeason && (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>
@@ -919,7 +1169,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 4: ANIME SUBGROUP SELECTOR VIEW (Mikan) */}
+          {/* VIEW 5: ANIME SUBGROUP SELECTOR VIEW (Mikan) */}
           {activeTab === "search" && step === "anime_subgroups" && selectedAnime && (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px", borderBottom: "1px solid var(--border-light)", paddingBottom: "12px" }}>
@@ -1029,7 +1279,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </div>
           )}
 
-          {/* VIEW 5: DIRECT CUSTOM RSS URL TAB */}
+          {/* VIEW 6: DIRECT CUSTOM RSS URL TAB */}
           {activeTab === "direct" && step === "direct_input" && (
             <form onSubmit={(e) => { e.preventDefault(); loadRssPreview(rssUrl); }}>
               <div className="form-group">
@@ -1064,7 +1314,7 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
             </form>
           )}
 
-          {/* VIEW 6: STEP 2 CONFIRMATION & PAST EPISODES PREVIEW */}
+          {/* VIEW 7: STEP 2 CONFIRMATION & PAST EPISODES PREVIEW */}
           {step === "preview" && (
             <form onSubmit={handleSubscribe}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "14px" }}>

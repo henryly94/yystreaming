@@ -8,8 +8,9 @@ import { execSync, spawn } from 'child_process';
 import { cleanShowName, deduplicateAndFilterRssItems } from './rss_parser.js';
 import { QBittorrentClient } from './qbittorrent.js';
 import { searchMikanAnime, getMikanBangumiDetails } from './mikan_search.js';
-import { searchTmdb, getTmdbShowDetails } from './tmdb.js';
+import { searchTmdb, getTmdbShowDetails, getTmdbMovieDetails } from './tmdb.js';
 import { searchUniversalMediaTorrents } from './tv_search.js';
+import { searchMovieTorrents } from './movie_search.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1085,24 +1086,123 @@ app.get('/api/media/search', async (req, res) => {
   }
 });
 
-// Fetch detailed seasons & info for a TMDB show
+// Fetch detailed info for a TMDB show or movie
 app.get('/api/media/details/:tmdbId', async (req, res) => {
   const { tmdbId } = req.params;
+  const { mediaType = 'tv' } = req.query;
+
   if (!tmdbId) {
     return res.status(400).json({ error: 'tmdbId is required' });
   }
 
   const settings = getSettings();
   try {
-    const details = await getTmdbShowDetails(tmdbId, settings.tmdbApiKey);
+    const details = mediaType === 'movie'
+      ? await getTmdbMovieDetails(tmdbId, settings.tmdbApiKey)
+      : await getTmdbShowDetails(tmdbId, settings.tmdbApiKey);
+
     if (!details) {
-      return res.status(404).json({ error: 'Show details not found' });
+      return res.status(404).json({ error: 'Media details not found' });
     }
     return res.json({ success: true, details });
   } catch (err) {
     console.error('Error in /api/media/details:', err);
     return res.status(500).json({ error: 'Failed to fetch details: ' + err.message });
   }
+});
+
+// Fetch torrent releases for a Movie (YTS + APIBay)
+app.get('/api/media/movie-releases', async (req, res) => {
+  const { imdbId, title, originalTitle, year } = req.query;
+
+  try {
+    const result = await searchMovieTorrents({
+      imdbId,
+      title,
+      originalTitle,
+      year
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error('Error in /api/media/movie-releases:', err);
+    return res.status(500).json({ error: 'Failed to search movie releases: ' + err.message });
+  }
+});
+
+// Download Movie endpoint
+app.post('/api/media/subscribe-movie', async (req, res) => {
+  const {
+    title,
+    originalTitle,
+    year,
+    posterUrl,
+    downloadUrl,
+    quality
+  } = req.body;
+
+  if (!title || !downloadUrl) {
+    return res.status(400).json({ error: 'Title and downloadUrl are required' });
+  }
+
+  const settings = getSettings();
+  const cleanTitle = cleanShowName(title);
+  const yearSuffix = year ? ` (${year})` : '';
+  const finalFolder = `Movies/${cleanTitle}${yearSuffix}`;
+
+  // 1. Resolve host save path
+  const hostSavePath = path.join(settings.videoDir, finalFolder);
+  if (!fs.existsSync(hostSavePath)) {
+    try {
+      fs.mkdirSync(hostSavePath, { recursive: true });
+    } catch (e) {}
+  }
+
+  // 2. Download TMDB poster
+  if (posterUrl) {
+    try {
+      const posterPath = path.join(hostSavePath, 'poster.jpg');
+      if (!fs.existsSync(posterPath)) {
+        const imgRes = await fetch(posterUrl);
+        if (imgRes.ok) {
+          const buffer = await imgRes.arrayBuffer();
+          fs.writeFileSync(posterPath, Buffer.from(buffer));
+          console.log(`[Movie Subscribe]: Saved official poster to ${posterPath}`);
+        }
+      }
+    } catch (err) {
+      console.warn('[Movie Subscribe]: Could not download poster:', err.message);
+    }
+  }
+
+  // 3. Push to qBittorrent under category Movies/<CleanTitle>
+  const isQbConfigured = Boolean(settings.qbHost && settings.qbPort);
+  if (isQbConfigured) {
+    try {
+      const qb = new QBittorrentClient(settings);
+      const qbSavePath = getQbSavePath(hostSavePath, settings);
+      const category = `Movies/${cleanTitle}${yearSuffix}`;
+      await qb.createCategory({ category, savePath: qbSavePath });
+
+      const currentYear = new Date().getFullYear();
+      const tags = ['rss-auto', 'media:movie', `year:${year || currentYear}`];
+
+      console.log(`[Movie Subscribe]: Pushing movie torrent to qBittorrent for "${cleanTitle}" under category "${category}"`);
+      await qb.addTorrents({
+        urls: [downloadUrl],
+        savePath: qbSavePath,
+        category,
+        tags
+      });
+    } catch (err) {
+      console.error('[Movie Subscribe]: Error pushing to qBittorrent:', err);
+    }
+  }
+
+  return res.json({
+    success: true,
+    movieName: `${cleanTitle}${yearSuffix}`,
+    category: `Movies/${cleanTitle}${yearSuffix}`
+  });
 });
 
 // Fetch torrent episodes for a specific TMDB show season

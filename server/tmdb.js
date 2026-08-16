@@ -37,15 +37,17 @@ export async function searchTmdb(query, apiKey = DEFAULT_TMDB_API_KEY) {
         const country = item.origin_country || [];
 
         // Determine friendly show type label
-        let showType = 'TV';
-        if (country.includes('CN') || country.includes('TW') || country.includes('HK')) {
-          showType = 'Chinese';
-        } else if (country.includes('KR')) {
-          showType = 'Korean';
-        } else if (country.includes('JP')) {
-          showType = 'Japanese';
-        } else if (country.includes('US') || country.includes('GB') || country.includes('CA') || country.includes('AU')) {
-          showType = 'Western';
+        let showType = isTv ? 'TV' : 'Movie';
+        if (isTv) {
+          if (country.includes('CN') || country.includes('TW') || country.includes('HK')) {
+            showType = 'Chinese';
+          } else if (country.includes('KR')) {
+            showType = 'Korean';
+          } else if (country.includes('JP')) {
+            showType = 'Japanese';
+          } else if (country.includes('US') || country.includes('GB') || country.includes('CA') || country.includes('AU')) {
+            showType = 'Western';
+          }
         }
 
         return {
@@ -129,13 +131,59 @@ export async function getTmdbShowDetails(tmdbId, apiKey = DEFAULT_TMDB_API_KEY) 
       country,
       numberOfSeasons: data.number_of_seasons || seasons.length,
       numberOfEpisodes: data.number_of_episodes || 0,
-      status: data.status || 'Ended',
+      status: data.status || '',
       posterUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null,
       backdropUrl: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null,
       seasons
     };
   } catch (err) {
-    console.error(`[TMDB Details]: Error fetching show ${tmdbId}:`, err.message);
+    console.error(`[TMDB Details]: Error loading TV show ${tmdbId}:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch full details for a Movie including IMDb ID
+ */
+export async function getTmdbMovieDetails(tmdbId, apiKey = DEFAULT_TMDB_API_KEY) {
+  if (!tmdbId) return null;
+
+  const key = (apiKey && apiKey.trim()) || DEFAULT_TMDB_API_KEY;
+  const url = `https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${key}&language=zh-CN&append_to_response=external_ids`;
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      }
+    });
+
+    if (!res.ok) {
+      console.error(`[TMDB Movie Details]: HTTP error ${res.status}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const imdbId = data.external_ids?.imdb_id || null;
+
+    return {
+      id: data.id,
+      mediaType: 'movie',
+      showType: 'Movie',
+      name: data.title || data.original_title,
+      originalName: data.original_title,
+      imdbId,
+      overview: data.overview || '',
+      runtime: data.runtime || 0,
+      releaseDate: data.release_date || '',
+      year: data.release_date ? data.release_date.split('-')[0] : '',
+      voteAverage: data.vote_average || 0,
+      posterUrl: data.poster_path ? `https://image.tmdb.org/t/p/w500${data.poster_path}` : null,
+      backdropUrl: data.backdrop_path ? `https://image.tmdb.org/t/p/original${data.backdrop_path}` : null
+    };
+  } catch (err) {
+    console.error(`[TMDB Movie Details]: Error loading movie ${tmdbId}:`, err.message);
     return null;
   }
 }
