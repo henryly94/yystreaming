@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
   Tv, Settings as SettingsIcon, Play, Pause, AlertCircle, 
   Search, ArrowLeft, CheckCircle2, CircleDot, RefreshCw,
-  ArrowUp, Sparkles, Film
+  ArrowUp, Sparkles, Film, SkipForward, Trash2
 } from 'lucide-react';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SettingsModal } from './components/SettingsModal';
@@ -77,6 +77,34 @@ export default function App() {
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleSkipOptimization = async () => {
+    try {
+      const res = await fetch('/api/library/optimize/skip', { method: 'POST' });
+      if (res.ok) {
+        showToast('⏭️ Skipped current video. Next in queue starting...');
+      }
+    } catch (e) {
+      console.error('Error skipping optimization:', e);
+    }
+  };
+
+  const handleRemoveFromQueue = async (absolutePath: string) => {
+    try {
+      const res = await fetch('/api/library/optimize/queue/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ absolutePath })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(data.message || 'Removed from queue');
+        setOptimizeQueue(data.queue || []);
+      }
+    } catch (e) {
+      console.error('Error removing from queue:', e);
+    }
   };
 
   const handlePrioritizeVideo = async (absolutePath: string) => {
@@ -788,13 +816,24 @@ export default function App() {
                         <Play size={12} fill="currentColor" /> Resume
                       </button>
                     ) : optimizeProgress.isRunning ? (
-                      <button
-                        className="btn btn-secondary"
-                        style={{ padding: '3px 10px', fontSize: '0.75rem', height: '26px', gap: '4px' }}
-                        onClick={handlePauseOptimization}
-                      >
-                        <Pause size={12} fill="currentColor" /> Pause
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '3px 10px', fontSize: '0.75rem', height: '26px', gap: '4px' }}
+                          onClick={handlePauseOptimization}
+                          title="Pause optimization"
+                        >
+                          <Pause size={12} fill="currentColor" /> Pause
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '3px 10px', fontSize: '0.75rem', height: '26px', gap: '4px', background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#fca5a5' }}
+                          onClick={handleSkipOptimization}
+                          title="Skip currently transcoding video and immediately advance to next in queue"
+                        >
+                          <SkipForward size={12} /> Skip / Next
+                        </button>
+                      </div>
                     ) : null}
 
                     {optimizeProgress.totalFiles > 0 && (
@@ -835,7 +874,7 @@ export default function App() {
                   <div className="optimize-queue-container" style={{ marginTop: '16px', borderTop: '1px solid var(--border-light)', paddingTop: '12px' }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>Upcoming Queue ({optimizeQueue.length} pending)</span>
-                      <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>Click Prioritize to process next</span>
+                      <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>Fast Remux files automatically prioritized first</span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: isQueueExpanded ? '350px' : '180px', overflowY: 'auto', paddingRight: '4px' }}>
                       {optimizeQueue.slice(0, isQueueExpanded ? undefined : 5).map((item, idx) => (
@@ -852,17 +891,42 @@ export default function App() {
                             fontSize: '0.8rem'
                           }}
                         >
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%', color: 'var(--text-muted)' }} title={item.fileName}>
-                            {idx + 1}. {item.fileName}
-                          </span>
-                          <button 
-                            className="btn btn-primary"
-                            style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto', minHeight: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            onClick={() => handlePrioritizeVideo(item.absolutePath)}
-                            title="Prioritize (process next)"
-                          >
-                            <ArrowUp size={11} /> Prioritize
-                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', maxWidth: '65%' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }} title={item.fileName}>
+                              {idx + 1}. {item.fileName}
+                            </span>
+                            {item.optType && (
+                              <span style={{
+                                fontSize: '0.68rem',
+                                padding: '1px 5px',
+                                borderRadius: '3px',
+                                background: item.optType.includes('Fast') ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                                color: item.optType.includes('Fast') ? '#4ade80' : 'var(--text-dim)',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                {item.optType}
+                              </span>
+                            )}
+                          </div>
+                          
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <button 
+                              className="btn btn-primary"
+                              style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto', minHeight: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              onClick={() => handlePrioritizeVideo(item.absolutePath)}
+                              title="Prioritize (process next)"
+                            >
+                              <ArrowUp size={11} /> Prioritize
+                            </button>
+                            <button 
+                              className="btn btn-secondary"
+                              style={{ padding: '2px 6px', fontSize: '0.75rem', height: 'auto', minHeight: 'auto', display: 'inline-flex', alignItems: 'center', color: '#fca5a5' }}
+                              onClick={() => handleRemoveFromQueue(item.absolutePath)}
+                              title="Remove from queue"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
                         </div>
                       ))}
                       {optimizeQueue.length > 5 && (

@@ -248,6 +248,61 @@ function isPausedState() {
   return false;
 }
 
+function isSkipRequested() {
+  if (fs.existsSync(STATUS_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
+      return !!data.skipCurrent;
+    } catch (e) {}
+  }
+  return false;
+}
+
+// Calculate smart priority score for an optimization item
+function scoreVideoForOptimization(item) {
+  let score = 0;
+  try {
+    let sizeMb = 0;
+    try {
+      const stat = fs.statSync(item.absolutePath);
+      sizeMb = stat.size / (1024 * 1024);
+    } catch (e) {}
+
+    const probe = probeStreams(item.absolutePath);
+    const vStream = getVideoStream(probe);
+    const aStream = getAudioStream(probe);
+    const subStream = getTextSubtitleStream(probe);
+    const hasExtSub = !!findBestExternalSubtitle(item.directory, item.baseName);
+
+    const vCodec = vStream ? (vStream.codec_name || '').toLowerCase() : '';
+    const pixFmt = vStream ? (vStream.pix_fmt || '').toLowerCase() : '';
+    const aCodec = aStream ? (aStream.codec_name || '').toLowerCase() : '';
+
+    const isH264 = vCodec === 'h264';
+    const is8Bit = !pixFmt || pixFmt === 'yuv420p';
+    const isAacOrMp3 = ['aac', 'mp3'].includes(aCodec);
+    const hasSubtitles = subStream || hasExtSub;
+
+    if (!hasSubtitles && isH264 && is8Bit && isAacOrMp3) {
+      // 1. Ultra Fast Remux (2 to 5 seconds) -> Tier 1 (Score 10,000,000)
+      score = 10000000 - sizeMb;
+      item.optType = 'Fast Remux (2s)';
+    } else if (!hasSubtitles && isH264 && is8Bit) {
+      // 2. Video Copy + Fast Audio Transcode -> Tier 2 (Score 5,000,000)
+      score = 5000000 - sizeMb;
+      item.optType = 'Video Copy + Audio (15s)';
+    } else {
+      // 3. Full Transcode (HEVC / 10-bit / Burn Subtitles) -> Tier 3 (Smallest files first)
+      score = 1000000 - sizeMb;
+      item.optType = hasSubtitles ? 'Burn Subtitles' : 'Full Transcode';
+    }
+  } catch (err) {
+    score = 0;
+  }
+  item.score = score;
+  return score;
+}
+
 // Main logic
 async function main() {
   resolveTools();
@@ -284,6 +339,10 @@ async function main() {
   console.log('Scanning library:', videoDir);
   const scannedQueue = scanDirectory(videoDir);
 
+  // Score all scanned videos for fast processing prioritization
+  scannedQueue.forEach(item => scoreVideoForOptimization(item));
+  scannedQueue.sort((a, b) => (b.score || 0) - (a.score || 0));
+
   // Merge scanned queue with existing queue
   let persistedQueue = [];
   if (fs.existsSync(QUEUE_FILE)) {
@@ -302,8 +361,13 @@ async function main() {
   const existingPaths = new Set(persistedQueue.map(item => item.absolutePath));
   const newItems = scannedQueue.filter(item => !existingPaths.has(item.absolutePath));
 
-  // Append new items
+  // Append new items and re-sort by score (preserving manually prioritized items with high score)
   persistedQueue = [...persistedQueue, ...newItems];
+  persistedQueue.forEach(item => {
+    if (!item.score) scoreVideoForOptimization(item);
+  });
+  persistedQueue.sort((a, b) => (b.score || 0) - (a.score || 0));
+
   fs.writeFileSync(QUEUE_FILE, JSON.stringify(persistedQueue, null, 2), 'utf8');
 
   if (persistedQueue.length === 0) {
@@ -471,6 +535,23 @@ async function main() {
       });
 
       const checkPauseTimer = setInterval(() => {
+        if (isSkipRequested()) {
+          console.log(`\n[Preprocessor]: Skip signal detected for "${item.fileName}". Terminating FFmpeg process and advancing to next item...`);
+          clearInterval(checkPauseTimer);
+          try {
+            proc.kill('SIGKILL');
+          } catch (e) {}
+
+          const tempFile = path.join(item.directory, tempOutputFileName);
+          if (fs.existsSync(tempFile)) {
+            try { fs.unlinkSync(tempFile); } catch (e) {}
+          }
+
+          writeStatus({ skipCurrent: false, currentFile: null, percentage: 0, speed: '0x' });
+          resolve();
+          return;
+        }
+
         if (isPausedState()) {
           console.log('\n[Preprocessor]: Pause signal detected. Terminating FFmpeg process...');
           clearInterval(checkPauseTimer);

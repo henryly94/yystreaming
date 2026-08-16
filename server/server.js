@@ -613,9 +613,9 @@ app.post('/api/library/optimize/queue/prioritize', (req, res) => {
     }
 
     const item = queue[itemIndex];
-    // Remove from current position
+    // Give item highest priority score
+    item.score = 99999999;
     queue.splice(itemIndex, 1);
-    // Move to the very beginning (index 0) so it is the next file picked up!
     queue.unshift(item);
 
     fs.writeFileSync(queueFile, JSON.stringify(queue, null, 2), 'utf8');
@@ -623,6 +623,54 @@ app.post('/api/library/optimize/queue/prioritize', (req, res) => {
   } catch (e) {
     console.error('Error prioritizing queue item:', e);
     res.status(500).json({ error: 'Failed to update optimization queue' });
+  }
+});
+
+// Remove an item from the optimization queue
+app.post('/api/library/optimize/queue/remove', (req, res) => {
+  const { absolutePath } = req.body;
+  if (!absolutePath) {
+    return res.status(400).json({ error: 'absolutePath is required' });
+  }
+
+  const queueFile = path.join(__dirname, 'preprocess_queue.json');
+  if (!fs.existsSync(queueFile)) {
+    return res.status(404).json({ error: 'Optimization queue is empty' });
+  }
+
+  try {
+    let queue = JSON.parse(fs.readFileSync(queueFile, 'utf8'));
+    const itemIndex = queue.findIndex(item => item.absolutePath === absolutePath);
+    if (itemIndex !== -1) {
+      const removed = queue.splice(itemIndex, 1)[0];
+      fs.writeFileSync(queueFile, JSON.stringify(queue, null, 2), 'utf8');
+      return res.json({ success: true, message: `Removed ${removed.fileName} from queue`, queue });
+    }
+    return res.status(404).json({ error: 'Item not found in queue' });
+  } catch (e) {
+    console.error('Error removing queue item:', e);
+    return res.status(500).json({ error: 'Failed to remove item from queue' });
+  }
+});
+
+// Skip the currently transcoding file and immediately advance to next in queue
+app.post('/api/library/optimize/skip', (req, res) => {
+  const statusFile = path.join(__dirname, 'preprocess_status.json');
+  try {
+    let status = {};
+    if (fs.existsSync(statusFile)) {
+      try {
+        status = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+      } catch (e) {}
+    }
+    status.skipCurrent = true;
+    fs.writeFileSync(statusFile, JSON.stringify(status, null, 2), 'utf8');
+
+    console.log('[Optimization]: Skip signal sent for current video.');
+    return res.json({ success: true, message: 'Skip signal sent', status });
+  } catch (e) {
+    console.error('Error sending skip signal:', e);
+    return res.status(500).json({ error: 'Failed to send skip signal' });
   }
 });
 
