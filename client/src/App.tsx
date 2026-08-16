@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Tv, Settings as SettingsIcon, Play, Pause, AlertCircle, 
   Search, ArrowLeft, CheckCircle2, CircleDot, RefreshCw,
-  ArrowUp, Sparkles
+  ArrowUp, Sparkles, Film
 } from 'lucide-react';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SettingsModal } from './components/SettingsModal';
@@ -20,6 +20,9 @@ interface Episode {
 interface Show {
   id: string;
   name: string;
+  relPath?: string;
+  type?: 'anime' | 'tv' | 'movie' | 'other';
+  isMovie?: boolean;
   hasCover: boolean;
   coverExt: string | null;
   episodes: Episode[];
@@ -66,6 +69,7 @@ export default function App() {
   const [optimizeQueue, setOptimizeQueue] = useState<any[]>([]);
   const [isQueueExpanded, setIsQueueExpanded] = useState(false);
   const [isRssModalOpen, setIsRssModalOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'anime' | 'tv' | 'movie'>('all');
 
   // Load progress states to force UI updates when progress changes
   const [_, setProgressTrigger] = useState(0);
@@ -367,9 +371,25 @@ export default function App() {
     setProgressTrigger(prev => prev + 1);
   };
 
-  const filteredShows = library.filter(show => 
-    show.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const categoryCounts = useMemo(() => {
+    const counts = { all: library.length, anime: 0, tv: 0, movie: 0 };
+    library.forEach(s => {
+      if (s.type === 'movie' || s.isMovie) counts.movie++;
+      else if (s.type === 'tv') counts.tv++;
+      else counts.anime++;
+    });
+    return counts;
+  }, [library]);
+
+  const filteredShows = library.filter(show => {
+    const matchesSearch = show.name.toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (selectedCategory === 'all') return true;
+    if (selectedCategory === 'movie') return show.type === 'movie' || show.isMovie;
+    if (selectedCategory === 'tv') return show.type === 'tv';
+    if (selectedCategory === 'anime') return show.type === 'anime' || (!show.type && !show.isMovie);
+    return true;
+  });
 
   return (
     <div className="app-container">
@@ -874,10 +894,30 @@ export default function App() {
               </div>
             )}
 
+            {/* Top Category Navigation Tabs */}
+            <div className="category-tabs-container">
+              {[
+                { key: 'all', label: '🌟 All (全部)', count: categoryCounts.all },
+                { key: 'anime', label: '🎌 Anime (动漫)', count: categoryCounts.anime },
+                { key: 'tv', label: '📺 TV Series (剧集)', count: categoryCounts.tv },
+                { key: 'movie', label: '🎬 Movies (电影)', count: categoryCounts.movie }
+              ].map(tab => (
+                <button
+                  key={tab.key}
+                  className={`category-tab-btn ${selectedCategory === tab.key ? 'active' : ''}`}
+                  onClick={() => setSelectedCategory(tab.key as any)}
+                >
+                  <span>{tab.label}</span>
+                  <span className="category-tab-badge">{tab.count}</span>
+                </button>
+              ))}
+            </div>
+
             {filteredShows.length > 0 ? (
               <div className="show-grid">
                 {filteredShows.map(show => {
                   const { watchedCount, inProgressCount } = getShowWatchStatus(show);
+                  const isMovie = show.isMovie || show.type === 'movie';
                   
                   return (
                     <div
@@ -894,15 +934,29 @@ export default function App() {
                             loading="lazy"
                           />
                         ) : (
-                          <div className="show-cover-fallback">
-                            <Tv size={36} className="show-cover-fallback-icon" />
+                          <div className="show-cover-fallback" style={{
+                            background: isMovie 
+                              ? 'linear-gradient(135deg, #831843 0%, #371b58 100%)' 
+                              : show.type === 'tv'
+                              ? 'linear-gradient(135deg, #14532d 0%, #1e1b4b 100%)'
+                              : 'linear-gradient(135deg, #1e1b4b 0%, #311042 100%)'
+                          }}>
+                            {isMovie ? (
+                              <Film size={36} className="show-cover-fallback-icon" />
+                            ) : (
+                              <Tv size={36} className="show-cover-fallback-icon" />
+                            )}
                             <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f3f4f6', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', whiteSpace: 'nowrap', padding: '0 8px' }}>
                               {show.name}
                             </span>
                           </div>
                         )}
-                        <span className="show-episode-count">
-                          {show.episodes.length} EP
+                        <span className="show-episode-count" style={{
+                          background: isMovie ? 'rgba(236, 72, 153, 0.88)' :
+                                      show.type === 'tv' ? 'rgba(34, 197, 94, 0.88)' :
+                                      'rgba(0, 0, 0, 0.75)'
+                        }}>
+                          {isMovie ? '🎬 Movie' : show.type === 'tv' ? `📺 ${show.episodes.length} EP` : `${show.episodes.length} EP`}
                         </span>
                       </div>
                       

@@ -194,6 +194,89 @@ function findFilesRecursively(dirPath, relativeToDir) {
   return results;
 }
 
+// Discovers individual show / movie directories across hierarchical categories (Movies, TV, Anime)
+function discoverShowDirectories(videoDir) {
+  const showsToScan = [];
+  if (!fs.existsSync(videoDir)) return showsToScan;
+
+  try {
+    const entries = fs.readdirSync(videoDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const nameLower = entry.name.toLowerCase();
+
+      if (nameLower === 'movies' || nameLower === 'movie') {
+        const movieDir = path.join(videoDir, entry.name);
+        const movieEntries = fs.readdirSync(movieDir, { withFileTypes: true });
+        for (const mEntry of movieEntries) {
+          if (mEntry.isDirectory()) {
+            showsToScan.push({
+              relPath: path.posix.join(entry.name, mEntry.name),
+              name: mEntry.name,
+              type: 'movie'
+            });
+          }
+        }
+      } else if (nameLower === 'tv') {
+        const tvDir = path.join(videoDir, entry.name);
+        const tvEntries = fs.readdirSync(tvDir, { withFileTypes: true });
+        for (const tEntry of tvEntries) {
+          if (tEntry.isDirectory()) {
+            const subLower = tEntry.name.toLowerCase();
+            if (['western', 'chinese', 'korean', 'japanese', 'anime'].includes(subLower)) {
+              const subDir = path.join(tvDir, tEntry.name);
+              const subEntries = fs.readdirSync(subDir, { withFileTypes: true });
+              for (const sEntry of subEntries) {
+                if (sEntry.isDirectory()) {
+                  showsToScan.push({
+                    relPath: path.posix.join(entry.name, tEntry.name, sEntry.name),
+                    name: sEntry.name,
+                    type: 'tv'
+                  });
+                }
+              }
+            } else {
+              showsToScan.push({
+                relPath: path.posix.join(entry.name, tEntry.name),
+                name: tEntry.name,
+                type: 'tv'
+              });
+            }
+          }
+        }
+      } else if (nameLower === 'anime') {
+        const animeDir = path.join(videoDir, entry.name);
+        const animeEntries = fs.readdirSync(animeDir, { withFileTypes: true });
+        for (const aEntry of animeEntries) {
+          if (aEntry.isDirectory()) {
+            showsToScan.push({
+              relPath: path.posix.join(entry.name, aEntry.name),
+              name: aEntry.name,
+              type: 'anime'
+            });
+          }
+        }
+      } else {
+        // Root-level directory
+        let type = 'anime';
+        if (/S0?\d+|Season|第\s*\d+\s*季/i.test(entry.name)) type = 'tv';
+        else if (/\((?:19|20)\d\d\)/.test(entry.name)) type = 'movie';
+
+        showsToScan.push({
+          relPath: entry.name,
+          name: entry.name,
+          type
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error discovering show directories:', err);
+  }
+
+  return showsToScan;
+}
+
 // Scan video directory
 function scanLibrary(videoDir) {
   if (!fs.existsSync(videoDir)) {
@@ -204,88 +287,84 @@ function scanLibrary(videoDir) {
   let cacheUpdated = false;
   const shows = [];
   try {
-    const entries = fs.readdirSync(videoDir, { withFileTypes: true });
+    const discoveredShows = discoverShowDirectories(videoDir);
 
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const showDirName = entry.name;
-        const showPath = path.join(videoDir, showDirName);
-        const showId = Buffer.from(showDirName).toString('hex');
-        
-        // Recursively gather all files inside the show directory
-        const allFiles = findFilesRecursively(showPath, showPath);
-        const videoFiles = [];
-        const subtitleFiles = new Map();
-        let coverFile = null;
+    for (const discovered of discoveredShows) {
+      const showRelPath = discovered.relPath;
+      const showDirName = discovered.name;
+      const showType = discovered.type;
+      const showPath = path.join(videoDir, showRelPath);
+      const showId = Buffer.from(showRelPath).toString('hex');
+      
+      // Recursively gather all files inside the show directory
+      const allFiles = findFilesRecursively(showPath, showPath);
+      const videoFiles = [];
+      const subtitleFiles = new Map();
+      let coverFile = null;
 
-        for (const file of allFiles) {
-          const ext = file.ext;
-          const nameWithoutExt = path.basename(file.fileName, ext);
-          const relPathNormalized = file.relativePath.replace(/\\/g, '/');
+      for (const file of allFiles) {
+        const ext = file.ext;
+        const nameWithoutExt = path.basename(file.fileName, ext);
+        const relPathNormalized = file.relativePath.replace(/\\/g, '/');
 
-            if (['.mp4', '.webm', '.mkv', '.mov', '.avi'].includes(ext)) {
-              // Include video file even if currently downloading
-              videoFiles.push({ 
-                name: file.fileName, 
-                nameWithoutExt, 
-                ext, 
-                path: file.absolutePath,
-                relativePath: relPathNormalized
-              });
-            } else if (['.srt', '.vtt', '.ass', '.ssa'].includes(ext)) {
-            // Index subtitle by its normalized relative path without extension, stripping language tags
-            const relPathNoExt = relPathNormalized.slice(0, -ext.length).toLowerCase();
-            const strippedKey = relPathNoExt.replace(/\.(chs|cht|zh-hans|zh-hant|zh-cn|zh-tw|zh-hk|zh|eng|en|chi|zho)$/i, '');
-            subtitleFiles.set(strippedKey, { name: file.fileName, ext, path: file.absolutePath });
-          } else if (['cover.jpg', 'cover.png', 'poster.jpg', 'poster.png', 'folder.jpg', 'folder.png'].includes(file.fileName.toLowerCase())) {
-            // Prioritize root-level covers, fallback to nested covers
-            const isRootLevel = !relPathNormalized.includes('/');
-            if (isRootLevel || !coverFile) {
-              coverFile = file.absolutePath;
-            }
-          }
-        }
-
-        // If no official cover file, look for any image files
-        if (!coverFile) {
-          const imageFile = allFiles.find(file => {
-            return ['.jpg', '.jpeg', '.png', '.webp'].includes(file.ext);
+        if (['.mp4', '.webm', '.mkv', '.mov', '.avi'].includes(ext)) {
+          videoFiles.push({ 
+            name: file.fileName, 
+            nameWithoutExt, 
+            ext, 
+            path: file.absolutePath,
+            relativePath: relPathNormalized
           });
-          if (imageFile) {
-            coverFile = imageFile.absolutePath;
-          }
-        }
-
-        // Sort video files alphabetically (natural sort order by relative path)
-        videoFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
-
-        // Filter out raw MKV/AVI/MOV files if a converted MP4 version exists with the same base name
-        const filteredVideoFiles = [];
-        const mp4Paths = new Set(
-          videoFiles.filter(v => v.ext === '.mp4').map(v => v.relativePath.slice(0, -4).toLowerCase())
-        );
-
-        for (const video of videoFiles) {
-          const baseRelPath = video.relativePath.slice(0, -video.ext.length).toLowerCase();
-          if (['.mkv', '.avi', '.mov'].includes(video.ext) && mp4Paths.has(baseRelPath)) {
-            // Hide the original raw format file from the web UI
-            continue;
-          }
-          filteredVideoFiles.push(video);
-        }
-
-        const episodes = [];
-        for (const video of filteredVideoFiles) {
-          const relPath = path.join(showDirName, video.relativePath);
-          const episodeId = Buffer.from(relPath).toString('hex');
-          
-          // Match subtitle by relative path without extension, stripping language tags
-          const relPathNoExt = video.relativePath.slice(0, -video.ext.length).toLowerCase();
+        } else if (['.srt', '.vtt', '.ass', '.ssa'].includes(ext)) {
+          const relPathNoExt = relPathNormalized.slice(0, -ext.length).toLowerCase();
           const strippedKey = relPathNoExt.replace(/\.(chs|cht|zh-hans|zh-hant|zh-cn|zh-tw|zh-hk|zh|eng|en|chi|zho)$/i, '');
-          const matchingSub = subtitleFiles.get(strippedKey);
+          subtitleFiles.set(strippedKey, { name: file.fileName, ext, path: file.absolutePath });
+        } else if (['cover.jpg', 'cover.png', 'poster.jpg', 'poster.png', 'folder.jpg', 'folder.png'].includes(file.fileName.toLowerCase())) {
+          const isRootLevel = !relPathNormalized.includes('/');
+          if (isRootLevel || !coverFile) {
+            coverFile = file.absolutePath;
+          }
+        }
+      }
 
-          // Extract episode number for friendly display badge
-          let epBadge = '';
+      // If no official cover file, look for any image files
+      if (!coverFile) {
+        const imageFile = allFiles.find(file => {
+          return ['.jpg', '.jpeg', '.png', '.webp'].includes(file.ext);
+        });
+        if (imageFile) {
+          coverFile = imageFile.absolutePath;
+        }
+      }
+
+      // Sort video files alphabetically
+      videoFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath, undefined, { numeric: true, sensitivity: 'base' }));
+
+      // Filter out raw MKV/AVI/MOV files if a converted MP4 version exists with the same base name
+      const filteredVideoFiles = [];
+      const mp4Paths = new Set(
+        videoFiles.filter(v => v.ext === '.mp4').map(v => v.relativePath.slice(0, -4).toLowerCase())
+      );
+
+      for (const video of videoFiles) {
+        const baseRelPath = video.relativePath.slice(0, -video.ext.length).toLowerCase();
+        if (['.mkv', '.avi', '.mov'].includes(video.ext) && mp4Paths.has(baseRelPath)) {
+          continue;
+        }
+        filteredVideoFiles.push(video);
+      }
+
+      const episodes = [];
+      for (const video of filteredVideoFiles) {
+        const relPath = path.posix.join(showRelPath, video.relativePath);
+        const episodeId = Buffer.from(relPath).toString('hex');
+        
+        const relPathNoExt = video.relativePath.slice(0, -video.ext.length).toLowerCase();
+        const strippedKey = relPathNoExt.replace(/\.(chs|cht|zh-hans|zh-hant|zh-cn|zh-tw|zh-hk|zh|eng|en|chi|zho)$/i, '');
+        const matchingSub = subtitleFiles.get(strippedKey);
+
+        let epBadge = '';
+        if (showType !== 'movie') {
           const cnM = video.name.match(/第\s*(\d{1,4}(?:\.5)?)\s*(?:v\d+)?\s*[集話话]/i);
           if (cnM) {
             epBadge = `EP ${cnM[1].padStart(2, '0')} · `;
@@ -304,50 +383,52 @@ function scanLibrary(videoDir) {
               }
             }
           }
+        }
 
-          // Build a friendly display name including subfolders (e.g. "EP 01 · [Sakurato] Episode 1")
-          const displayName = `${epBadge}${video.relativePath.slice(0, -video.ext.length)}`;
+        const displayName = `${epBadge}${video.relativePath.slice(0, -video.ext.length)}`;
 
-          let duration = 0;
-          try {
-            const stat = fs.statSync(video.path);
-            const cacheKey = video.path;
-            const cached = metadataCache[cacheKey];
+        let duration = 0;
+        try {
+          const stat = fs.statSync(video.path);
+          const cacheKey = video.path;
+          const cached = metadataCache[cacheKey];
 
-            if (cached && cached.mtime === stat.mtimeMs && cached.size === stat.size) {
-              duration = cached.duration;
-            } else {
-              duration = getVideoDuration(video.path);
-              metadataCache[cacheKey] = {
-                duration,
-                mtime: stat.mtimeMs,
-                size: stat.size
-              };
-              cacheUpdated = true;
-            }
-          } catch (statErr) {
-            console.error(`Error resolving duration for ${video.name}:`, statErr.message);
+          if (cached && cached.mtime === stat.mtimeMs && cached.size === stat.size) {
+            duration = cached.duration;
+          } else {
+            duration = getVideoDuration(video.path);
+            metadataCache[cacheKey] = {
+              duration,
+              mtime: stat.mtimeMs,
+              size: stat.size
+            };
+            cacheUpdated = true;
           }
-
-          episodes.push({
-            id: episodeId,
-            name: displayName,
-            fileName: video.name,
-            hasSubtitle: !!matchingSub,
-            subtitleExt: matchingSub ? matchingSub.ext : null,
-            duration: duration
-          });
+        } catch (statErr) {
+          console.error(`Error resolving duration for ${video.name}:`, statErr.message);
         }
 
-        if (episodes.length > 0 || coverFile || allFiles.some(f => f.fileName.includes('.!qB'))) {
-          shows.push({
-            id: showId,
-            name: showDirName,
-            hasCover: !!coverFile,
-            coverExt: coverFile ? path.extname(coverFile) : null,
-            episodes
-          });
-        }
+        episodes.push({
+          id: episodeId,
+          name: displayName,
+          fileName: video.name,
+          hasSubtitle: !!matchingSub,
+          subtitleExt: matchingSub ? matchingSub.ext : null,
+          duration: duration
+        });
+      }
+
+      if (episodes.length > 0 || coverFile || allFiles.some(f => f.fileName.includes('.!qB'))) {
+        shows.push({
+          id: showId,
+          name: showDirName,
+          relPath: showRelPath,
+          type: showType,
+          isMovie: showType === 'movie',
+          hasCover: !!coverFile,
+          coverExt: coverFile ? path.extname(coverFile) : null,
+          episodes
+        });
       }
     }
   } catch (err) {
