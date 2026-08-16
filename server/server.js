@@ -1174,20 +1174,22 @@ app.post('/api/media/subscribe', async (req, res) => {
   }
 
   // 4. Create category & add torrents in qBittorrent
-  const qbClient = getQbClient(settings);
-  if (qbClient) {
+  const isQbConfigured = Boolean(settings.qbHost && settings.qbPort);
+  if (isQbConfigured) {
     try {
+      const qb = new QBittorrentClient(settings);
       const qbSavePath = getQbSavePath(hostSavePath, settings);
-      await qbClient.createCategory({ category, savePath: qbSavePath });
+      await qb.createCategory({ category, savePath: qbSavePath });
 
       // Add tags: rss-auto, media:tv, status:airing, season:2026-Qx
       const currentYear = new Date().getFullYear();
       const currentQuarter = Math.floor((new Date().getMonth() + 3) / 3);
-      const tags = `rss-auto,media:tv,status:airing,season:${currentYear}-Q${currentQuarter}`;
+      const tags = ['rss-auto', 'media:tv', 'status:airing', `season:${currentYear}-Q${currentQuarter}`];
 
       const torrentUrls = selectedEpisodes.map(ep => ep.downloadUrl).filter(Boolean);
       if (torrentUrls.length > 0) {
-        await qbClient.addTorrents({
+        console.log(`[Media Subscribe]: Pushing ${torrentUrls.length} torrents to qBittorrent under category "${category}"`);
+        await qb.addTorrents({
           urls: torrentUrls,
           savePath: qbSavePath,
           category,
