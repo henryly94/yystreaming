@@ -1,30 +1,32 @@
 // Multi-Channel TV & Drama Torrent Search Engine (EZTV + APIBay + DMHY)
 
 /**
- * Search Western TV torrents using EZTV API + APIBay multi-source engine
+ * Search Western TV torrents using EZTV API (with multi-page pagination) + APIBay multi-source engine
  */
 export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber = 1) {
-  const episodes = [];
+  const allRawEpisodes = [];
   const normalizedTitle = (englishTitle || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
   const searchWords = normalizedTitle.split(/\s+/).filter(w => w.length > 1);
 
-  // 1. Try EZTV (by IMDb ID) with strict title validation
+  // 1. Try EZTV (by IMDb ID) with multi-page pagination (up to 4 pages for deep historical season support)
   if (imdbId && imdbId.startsWith('tt')) {
     const numericId = imdbId.replace('tt', '');
-    const url = `https://eztv.re/api/get-torrents?imdb_id=${numericId}&limit=100`;
+    
+    for (let page = 1; page <= 4; page++) {
+      const url = `https://eztv.re/api/get-torrents?imdb_id=${numericId}&limit=100&page=${page}`;
 
-    try {
-      console.log(`[Western TV Search]: Fetching EZTV torrents from ${url}`);
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Accept': 'application/json'
-        }
-      });
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'Accept': 'application/json'
+          }
+        });
 
-      if (res.ok) {
+        if (!res.ok) break;
         const data = await res.json();
         const rawTorrents = data.torrents || [];
+        if (rawTorrents.length === 0) break;
 
         // Filter by title match & season
         const validTorrents = rawTorrents.filter(t => {
@@ -34,34 +36,38 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
           return titleMatches && (isNaN(s) || s === 0 || s === seasonNumber);
         });
 
-        console.log(`[Western TV Search]: EZTV matched ${validTorrents.length} verified torrents for "${englishTitle}"`);
-
         for (const t of validTorrents) {
           const rawEp = parseInt(t.episode, 10);
           const epNum = isNaN(rawEp) || rawEp === 0 ? 'Season_Pack' : String(rawEp).padStart(2, '0');
 
-          episodes.push({
+          allRawEpisodes.push({
             rawTitle: t.title,
             episodeNum: epNum,
             cleanEpisodeName: epNum === 'Season_Pack' ? `Season ${seasonNumber} Complete Pack` : `Episode ${epNum}`,
             seasonNumber,
             is1080p: /1080p/i.test(t.title),
             is720p: /720p/i.test(t.title),
-            isH264: /x264|h\.?264|avc/i.test(t.title),
+            isH264: /x264|h\.?264|avc/i.test(t.title) && !/x265|hevc|h\.?265/i.test(t.title),
             isHevc: /x265|hevc|h\.?265/i.test(t.title),
             downloadUrl: t.magnet_url || t.torrent_url,
             sizeMb: (t.size_bytes / (1024 * 1024)).toFixed(1),
             seeds: t.seeds || 0
           });
         }
+
+        // If we found enough episodes for the requested season on early pages, stop pagination
+        const foundSeasonEps = new Set(allRawEpisodes.filter(e => e.episodeNum !== 'Season_Pack').map(e => e.episodeNum));
+        if (foundSeasonEps.size >= 10 && page >= 2) break;
+      } catch (err) {
+        console.warn(`[Western TV Search]: EZTV page ${page} error:`, err.message);
+        break;
       }
-    } catch (err) {
-      console.warn('[Western TV Search]: EZTV error:', err.message);
     }
   }
 
   // 2. Multi-Source Fallback (APIBay): If EZTV has no/few episodes (e.g. classic finished shows like Breaking Bad)
-  if (episodes.length < 5 && englishTitle) {
+  const uniqueEpNums = new Set(allRawEpisodes.map(e => e.episodeNum));
+  if (uniqueEpNums.size < 5 && englishTitle) {
     console.log(`[Western TV Search]: Querying APIBay fallback for "${englishTitle}" Season ${seasonNumber}...`);
     try {
       const qUrl = `https://apibay.org/q.php?q=${encodeURIComponent(englishTitle)}&cat=200`;
@@ -77,11 +83,11 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
             const titleMatches = searchWords.every(w => tNorm.includes(w));
             if (!titleMatches) continue;
 
-            // 1. Direct Episode / Season Match: S02, S02E01, Season 2, S2E1, Season.02
+            // Direct Episode / Season Match: S02, S02E01, Season 2, S2E1, Season.02
             const directRegex = new RegExp(`(?:\\bS0?${seasonNumber}(?:E\\d+|\\b)|\\bSeason[.\\s_-]*0?${seasonNumber}\\b)`, 'i');
             let isSeasonMatch = directRegex.test(t.name);
 
-            // 2. Boxsets covering seasonNumber (e.g. S01-S05)
+            // Boxsets covering seasonNumber (e.g. S01-S05)
             if (!isSeasonMatch) {
               const boxsetMatch = t.name.match(/(?:s0?1\s*-\s*s?0?([2-9])|seasons?\s*0?1\s*-\s*0?([2-9]))/i);
               if (boxsetMatch) {
@@ -100,14 +106,14 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
               epNum = epMatch[2].padStart(2, '0');
             }
 
-            episodes.push({
+            allRawEpisodes.push({
               rawTitle: t.name,
               episodeNum: epNum,
               cleanEpisodeName: epNum === 'Season_Pack' ? `Season ${seasonNumber} Complete Pack` : `Episode ${epNum}`,
               seasonNumber,
               is1080p: /1080p/i.test(t.name),
               is720p: /720p/i.test(t.name),
-              isH264: /x264|h264|h\.264|avc/i.test(t.name),
+              isH264: /x264|h264|h\.264|avc/i.test(t.name) && !/x265|hevc|h\.?265/i.test(t.name),
               isHevc: /x265|hevc|h265/i.test(t.name),
               downloadUrl: magnet,
               sizeMb: (parseInt(t.size, 10) / (1024 * 1024)).toFixed(1),
@@ -121,62 +127,139 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
     }
   }
 
-  // 3. Deduplicate and group by episode / season pack
-  const grouped = new Map();
-  for (const ep of episodes) {
-    if (!grouped.has(ep.episodeNum)) grouped.set(ep.episodeNum, []);
-    grouped.get(ep.episodeNum).push(ep);
+  // 3. Organize all releases by episode number
+  const allReleasesByEpisode = {};
+  for (const ep of allRawEpisodes) {
+    if (!allReleasesByEpisode[ep.episodeNum]) {
+      allReleasesByEpisode[ep.episodeNum] = [];
+    }
+    // Deduplicate exact downloadUrl
+    if (!allReleasesByEpisode[ep.episodeNum].some(existing => existing.downloadUrl === ep.downloadUrl)) {
+      allReleasesByEpisode[ep.episodeNum].push(ep);
+    }
   }
 
-  const selected = [];
-  for (const [epNum, list] of grouped.entries()) {
-    list.sort((a, b) => {
-      if (epNum === 'Season_Pack') {
-        const scorePack = (item) => {
-          let score = 0;
-          const isDirectSeason = new RegExp(`(?:\\bS0?${seasonNumber}\\b|\\bSeason[.\\s_-]*0?${seasonNumber}\\b)`, 'i').test(item.rawTitle);
-          if (isDirectSeason) score += 100;
+  // Sort releases inside each episode (Seeds > Resolution)
+  for (const epNum of Object.keys(allReleasesByEpisode)) {
+    allReleasesByEpisode[epNum].sort((a, b) => {
+      if (a.is1080p !== b.is1080p) return b.is1080p ? 1 : -1;
+      return (b.seeds || 0) - (a.seeds || 0);
+    });
+  }
 
-          const sizeNum = parseFloat(item.sizeMb || '0');
-          if (sizeNum >= 1500 && sizeNum <= 15000) score += 50; // Sweet spot: 1.5GB - 15GB for whole season
-          else if (sizeNum > 30000) score -= 50; // Penalize 30GB+ multi-season dumps
+  // 4. Build Cohesive Release Packages (Profiles)
+  const packageConfigs = [
+    {
+      id: '1080p_h264',
+      name: '⚡ 1080p H.264 (Recommended)',
+      desc: '1080p H.264 · ⚡ 2s Remux / Native Direct Play',
+      badge: '⚡ Fast Remux',
+      badgeColor: 'green',
+      filter: (item) => item.is1080p && item.isH264,
+      fallbackFilter: (item) => item.isH264 || item.is1080p
+    },
+    {
+      id: '1080p_hevc',
+      name: '🔥 1080p HEVC (x265)',
+      desc: '1080p HEVC · 50% Space Saving / High Efficiency',
+      badge: '🔥 Compact Size',
+      badgeColor: 'purple',
+      filter: (item) => item.is1080p && item.isHevc,
+      fallbackFilter: (item) => item.isHevc || item.is1080p
+    },
+    {
+      id: '720p_h264',
+      name: '⚡ 720p H.264',
+      desc: '720p H.264 · Ultra-Fast Download / Low Bandwidth',
+      badge: '⚡ Fast Download',
+      badgeColor: 'blue',
+      filter: (item) => item.is720p && item.isH264,
+      fallbackFilter: (item) => item.is720p || item.isH264
+    },
+    {
+      id: '720p_hevc',
+      name: '🔥 720p HEVC (x265)',
+      desc: '720p HEVC · Minimal Storage Footprint',
+      badge: '🔥 Ultra-Light',
+      badgeColor: 'indigo',
+      filter: (item) => item.is720p && item.isHevc,
+      fallbackFilter: (item) => item.isHevc
+    }
+  ];
 
-          if (item.is1080p) score += 30;
-          else if (item.is720p) score += 20;
+  const packages = [];
+  const individualEpisodeNums = Object.keys(allReleasesByEpisode)
+    .filter(k => k !== 'Season_Pack')
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-          score += Math.min(item.seeds || 0, 30);
-          return score;
-        };
-        return scorePack(b) - scorePack(a);
+  for (const config of packageConfigs) {
+    const pkgEpisodes = [];
+    let totalSizeMb = 0;
+
+    for (const epNum of individualEpisodeNums) {
+      const candidates = allReleasesByEpisode[epNum];
+      if (!candidates || candidates.length === 0) continue;
+
+      // 1. Exact package criteria match
+      let chosen = candidates.find(config.filter);
+      // 2. Coherent fallback criteria
+      if (!chosen && config.fallbackFilter) {
+        chosen = candidates.find(config.fallbackFilter);
+      }
+      // 3. Fallback to best available
+      if (!chosen) {
+        chosen = candidates[0];
       }
 
-      // Single episode Score: 1080p > 720p > 480p > 4K (4K deprioritized to prevent massive 6GB single episode downloads)
-      const getScore = (item) => {
-        let score = 0;
-        if (item.is1080p) score = 100;
-        else if (item.is720p) score = 80;
-        else if (/480p/i.test(item.rawTitle)) score = 50;
-        else if (/2160p|4k/i.test(item.rawTitle)) score = 30; // 4K only as fallback
-        else score = 60;
+      if (chosen) {
+        pkgEpisodes.push(chosen);
+        totalSizeMb += parseFloat(chosen.sizeMb || '0');
+      }
+    }
 
-        if (item.isH264) score += 10;
-        score += Math.min(item.seeds || 0, 30);
-        return score;
-      };
-
-      return getScore(b) - getScore(a);
-    });
-    selected.push(list[0]);
+    if (pkgEpisodes.length > 0) {
+      packages.push({
+        id: config.id,
+        name: config.name,
+        desc: config.desc,
+        badge: config.badge,
+        badgeColor: config.badgeColor,
+        episodeCount: pkgEpisodes.length,
+        totalSizeMb: Math.round(totalSizeMb),
+        episodes: pkgEpisodes
+      });
+    }
   }
 
-  selected.sort((a, b) => {
-    if (a.episodeNum === 'Season_Pack') return -1;
-    if (b.episodeNum === 'Season_Pack') return 1;
-    return a.episodeNum.localeCompare(b.episodeNum, undefined, { numeric: true });
-  });
+  // Include Season Packs package if season pack torrents exist
+  const seasonPacks = allReleasesByEpisode['Season_Pack'] || [];
+  if (seasonPacks.length > 0) {
+    packages.push({
+      id: 'season_packs',
+      name: '📦 Season Complete Packs',
+      desc: 'All-in-one single torrent downloads for entire season',
+      badge: '📦 Full Season Pack',
+      badgeColor: 'amber',
+      episodeCount: seasonPacks.length,
+      totalSizeMb: Math.round(seasonPacks.reduce((acc, p) => acc + parseFloat(p.sizeMb || '0'), 0) / seasonPacks.length),
+      episodes: seasonPacks
+    });
+  }
 
-  console.log(`[Western TV Search]: Total resolved episodes/packs for "${englishTitle}" Season ${seasonNumber}: ${selected.length}`);
-  return { success: true, count: selected.length, episodes: selected };
+  // Select default package (favor 1080p H.264 if available, otherwise first package)
+  const defaultPkg = packages.find(p => p.id === '1080p_h264') || packages[0];
+  const defaultEpisodes = defaultPkg ? defaultPkg.episodes : [];
+
+  console.log(`[Western TV Search]: Resolved ${packages.length} packages for "${englishTitle}" Season ${seasonNumber} (Default: ${defaultPkg?.name}, ${defaultEpisodes.length} episodes)`);
+
+  return {
+    success: true,
+    count: defaultEpisodes.length,
+    episodes: defaultEpisodes,
+    packages,
+    defaultPackageId: defaultPkg?.id || '1080p_h264',
+    allReleasesByEpisode
+  };
 }
 
 /**

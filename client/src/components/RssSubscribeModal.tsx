@@ -6,6 +6,7 @@ interface ParsedEpisode {
   episodeNum: string;
   cleanEpisodeName: string;
   isH264: boolean;
+  isHevc?: boolean;
   is1080p: boolean;
   is720p?: boolean;
   downloadUrl: string;
@@ -13,6 +14,17 @@ interface ParsedEpisode {
   seasonNumber?: number;
   sizeMb?: string;
   seeds?: number;
+}
+
+interface ReleasePackage {
+  id: string;
+  name: string;
+  desc: string;
+  badge: string;
+  badgeColor: string;
+  episodeCount: number;
+  totalSizeMb: number;
+  episodes: ParsedEpisode[];
 }
 
 interface UniversalSearchResult {
@@ -136,6 +148,10 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [selectedMovie, setSelectedMovie] = useState<TmdbMovieDetails | null>(null);
   const [movieReleases, setMovieReleases] = useState<MovieRelease[]>([]);
   const [tvEpisodes, setTvEpisodes] = useState<ParsedEpisode[]>([]);
+  const [tvPackages, setTvPackages] = useState<ReleasePackage[]>([]);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('1080p_h264');
+  const [allReleasesByEpisode, setAllReleasesByEpisode] = useState<Record<string, ParsedEpisode[]>>({});
+  const [expandedEpisodeNum, setExpandedEpisodeNum] = useState<string | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
@@ -419,7 +435,18 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
       const res = await fetch(`/api/media/episodes?${queryParams.toString()}`);
       const data = await res.json();
       if (res.ok && data.success) {
-        setTvEpisodes(data.episodes || []);
+        if (data.packages && data.packages.length > 0) {
+          setTvPackages(data.packages);
+          setSelectedPackageId(data.defaultPackageId || data.packages[0].id);
+          const activePkg = data.packages.find((p: ReleasePackage) => p.id === (data.defaultPackageId || data.packages[0].id)) || data.packages[0];
+          setTvEpisodes(activePkg.episodes || []);
+          setAllReleasesByEpisode(data.allReleasesByEpisode || {});
+        } else {
+          setTvEpisodes(data.episodes || []);
+          setTvPackages([]);
+          setAllReleasesByEpisode({});
+        }
+        setExpandedEpisodeNum(null);
         setStep("tv_episodes");
         if ((data.episodes || []).length === 0) {
           setError(`No torrent releases found for Season ${season.seasonNumber}.`);
@@ -1065,15 +1092,72 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 </div>
               </div>
 
+              {/* PACKAGE SELECTOR TABS */}
+              {tvPackages.length > 0 && (
+                <div style={{ marginBottom: "14px" }}>
+                  <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: "6px" }}>
+                    Select Codec & Quality Package (选择统一编码与清晰度方案):
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "6px" }}>
+                    {tvPackages.map(pkg => {
+                      const isSelected = selectedPackageId === pkg.id;
+                      return (
+                        <button
+                          key={pkg.id}
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            setSelectedPackageId(pkg.id);
+                            setTvEpisodes(pkg.episodes);
+                            setExpandedEpisodeNum(null);
+                          }}
+                          style={{
+                            padding: "8px 12px",
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            gap: "2px",
+                            background: isSelected ? "var(--surface-active, rgba(99, 102, 241, 0.15))" : "var(--surface-hover)",
+                            border: isSelected ? "1.5px solid var(--primary, #6366f1)" : "1px solid var(--border-light)",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            minWidth: "160px",
+                            flex: "1 0 auto"
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", width: "100%", justifyContent: "space-between" }}>
+                            <span style={{ fontWeight: 600, fontSize: "0.82rem", color: isSelected ? "var(--primary)" : "var(--text-main)" }}>
+                              {pkg.name}
+                            </span>
+                            <span className="badge" style={{
+                              background: pkg.badgeColor === 'green' ? 'rgba(34, 197, 94, 0.2)' : pkg.badgeColor === 'purple' ? 'rgba(168, 85, 247, 0.2)' : pkg.badgeColor === 'amber' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+                              color: pkg.badgeColor === 'green' ? '#4ade80' : pkg.badgeColor === 'purple' ? '#d8b4fe' : pkg.badgeColor === 'amber' ? '#fbbf24' : '#93c5fd',
+                              fontSize: "0.65rem",
+                              padding: "1px 5px"
+                            }}>
+                              {pkg.badge}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: "0.7rem", color: "var(--text-dim)" }}>
+                            {pkg.episodeCount} Episodes {pkg.totalSizeMb > 0 ? `· ${(pkg.totalSizeMb / 1024).toFixed(1)} GB` : ''}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginBottom: "14px" }}>
                 <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>Found {tvEpisodes.length} Episodes for Season {selectedSeason.seasonNumber}</span>
-                  <span style={{ fontSize: "0.75rem", color: "#4ade80", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <Zap size={12} /> 1080p Fast Direct-Play Filtered
+                  <span>Episodes Preview ({tvEpisodes.length} Episodes)</span>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                    Click 🔄 on any episode to switch release
                   </span>
                 </div>
 
-                <div style={{ maxHeight: "260px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
+                <div style={{ maxHeight: "280px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
                   {tvEpisodes.length === 0 ? (
                     <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
                       No episodes found for this season.
@@ -1081,64 +1165,135 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                   ) : (
                     tvEpisodes.map(ep => {
                       const isPack = ep.episodeNum === 'Season_Pack';
+                      const alternatives = (allReleasesByEpisode[ep.episodeNum] || []).filter(a => a.downloadUrl !== ep.downloadUrl);
+                      const isExpanded = expandedEpisodeNum === ep.episodeNum;
+
                       return (
                         <div key={ep.episodeNum} style={{
-                          padding: "10px 12px",
                           borderBottom: "1px solid var(--border-light)",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          fontSize: "0.82rem",
-                          background: isPack ? "rgba(99, 102, 241, 0.1)" : "transparent",
+                          padding: "8px 10px",
+                          background: isPack ? "rgba(99, 102, 241, 0.08)" : "transparent",
                           borderRadius: isPack ? "6px" : "0",
-                          marginBottom: isPack ? "6px" : "0"
+                          marginBottom: "4px"
                         }}>
-                          <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px" }}>
-                              <span style={{ fontWeight: 600, color: isPack ? "var(--primary)" : "var(--text-main)" }}>
-                                {isPack ? `📦 ${ep.cleanEpisodeName}` : ep.cleanEpisodeName}
-                              </span>
-                              {ep.is1080p && (
-                                <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.68rem", padding: "1px 6px" }}>
-                                  1080p
+                          <div style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "0.82rem"
+                          }}>
+                            <div style={{ flex: 1, minWidth: 0, paddingRight: "10px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px", flexWrap: "wrap" }}>
+                                <span style={{ fontWeight: 600, color: isPack ? "var(--primary)" : "var(--text-main)" }}>
+                                  {isPack ? `📦 ${ep.cleanEpisodeName}` : ep.cleanEpisodeName}
                                 </span>
-                              )}
-                              {ep.is720p && (
-                                <span className="badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", fontSize: "0.68rem", padding: "1px 6px" }}>
-                                  720p
-                                </span>
-                              )}
-                              {/2160p|4k/i.test(ep.rawTitle) && (
-                                <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.68rem", padding: "1px 6px" }}>
-                                  4K UHD
-                                </span>
-                              )}
-                              {ep.isH264 && (
-                                <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.68rem", padding: "1px 6px" }}>
-                                  H.264
-                                </span>
-                              )}
-                              {ep.sizeMb && ep.sizeMb !== '0' && (
-                                <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginLeft: "4px" }}>
-                                  ({parseFloat(ep.sizeMb) > 1024 ? `${(parseFloat(ep.sizeMb)/1024).toFixed(1)} GB` : `${Math.round(parseFloat(ep.sizeMb))} MB`})
-                                </span>
-                              )}
+                                {ep.is1080p && (
+                                  <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                    1080p
+                                  </span>
+                                )}
+                                {ep.is720p && (
+                                  <span className="badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                    720p
+                                  </span>
+                                )}
+                                {/2160p|4k/i.test(ep.rawTitle) && (
+                                  <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                    4K UHD
+                                  </span>
+                                )}
+                                {ep.isH264 && (
+                                  <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                    ⚡ H.264
+                                  </span>
+                                )}
+                                {ep.isHevc && (
+                                  <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.68rem", padding: "1px 6px" }}>
+                                    🔥 x265
+                                  </span>
+                                )}
+                                {ep.sizeMb && ep.sizeMb !== '0' && (
+                                  <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                                    ({parseFloat(ep.sizeMb) > 1024 ? `${(parseFloat(ep.sizeMb)/1024).toFixed(1)} GB` : `${Math.round(parseFloat(ep.sizeMb))} MB`})
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
+                                {ep.rawTitle}
+                              </div>
                             </div>
-                            <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", maxWidth: "340px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ep.rawTitle}>
-                              {ep.rawTitle}
+
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
+                              {alternatives.length > 0 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  onClick={() => setExpandedEpisodeNum(isExpanded ? null : ep.episodeNum)}
+                                  style={{ padding: "3px 8px", fontSize: "0.72rem", display: "flex", alignItems: "center", gap: "3px" }}
+                                  title="Switch release for this episode"
+                                >
+                                  <RefreshCw size={11} /> {isExpanded ? "Close" : `Options (${alternatives.length + 1})`}
+                                </button>
+                              )}
+
+                              {isPack && (
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  onClick={() => handleTrackTvSeason([ep])}
+                                  disabled={submitting}
+                                  style={{ padding: "4px 10px", fontSize: "0.75rem", whiteSpace: "nowrap" }}
+                                >
+                                  ⚡ Track Season Pack
+                                </button>
+                              )}
                             </div>
                           </div>
 
-                          {isPack && (
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              onClick={() => handleTrackTvSeason([ep])}
-                              disabled={submitting}
-                              style={{ padding: "4px 10px", fontSize: "0.75rem", whiteSpace: "nowrap", marginLeft: "10px" }}
-                            >
-                              ⚡ Track Full Season Pack
-                            </button>
+                          {/* INLINE ALTERNATIVE RELEASES ACCORDION */}
+                          {isExpanded && alternatives.length > 0 && (
+                            <div style={{ marginTop: "8px", padding: "6px", background: "var(--surface-active, rgba(0,0,0,0.2))", borderRadius: "6px", border: "1px solid var(--border-light)" }}>
+                              <div style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: "4px" }}>
+                                Alternative Releases for Episode {ep.episodeNum}:
+                              </div>
+                              {alternatives.map((alt, altIdx) => (
+                                <div key={altIdx} style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  padding: "5px 8px",
+                                  borderBottom: altIdx < alternatives.length - 1 ? "1px solid var(--border-light)" : "none",
+                                  fontSize: "0.74rem"
+                                }}>
+                                  <div style={{ flex: 1, minWidth: 0, paddingRight: "8px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "1px" }}>
+                                      {alt.is1080p && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd" }}>1080p</span>}
+                                      {alt.is720p && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7" }}>720p</span>}
+                                      {alt.isH264 && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(34, 197, 94, 0.2)", color: "#4ade80" }}>⚡ H.264</span>}
+                                      {alt.isHevc && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe" }}>🔥 x265</span>}
+                                      <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
+                                        {alt.sizeMb && alt.sizeMb !== '0' ? `${alt.sizeMb} MB` : ''} • {alt.seeds || 0} seeds
+                                      </span>
+                                    </div>
+                                    <div style={{ color: "var(--text-dim)", fontSize: "0.68rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={alt.rawTitle}>
+                                      {alt.rawTitle}
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={() => {
+                                      setTvEpisodes(prev => prev.map(item => item.episodeNum === ep.episodeNum ? alt : item));
+                                      setExpandedEpisodeNum(null);
+                                    }}
+                                    style={{ padding: "2px 8px", fontSize: "0.7rem", flexShrink: 0 }}
+                                  >
+                                    Use This
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </div>
                       );
