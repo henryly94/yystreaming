@@ -147,26 +147,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   // Load progress on mount or episode change
-  // Check if current browser supports HEVC/H.265 video decoding natively
-  const checkHevcSupport = () => {
-    try {
-      const v = document.createElement('video');
-      const canPlay1 = v.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"');
-      const canPlay2 = v.canPlayType('video/mp4; codecs="hvc1.2.4.L150.B0"');
-      const canPlay3 = v.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"');
-      return !!(canPlay1 || canPlay2 || canPlay3);
-    } catch (e) {
-      return false;
-    }
-  };
-
   // Stream Mode state for transcoding: 'remux' (Fast copy, 0 CPU) vs 'full' (Full re-encoding)
-  const [streamMode, setStreamMode] = useState<'remux' | 'full'>(() => {
-    // If browser lacks HEVC decoder, default to 'full' compatibility mode
-    return checkHevcSupport() ? 'remux' : 'full';
-  });
+  const [streamMode, setStreamMode] = useState<'remux' | 'full'>('remux');
   const [streamNotice, setStreamNotice] = useState<string | null>(null);
-  const [showCompatibilityPrompt, setShowCompatibilityPrompt] = useState(false);
 
   // Helper to build active transcode/stream URL
   const buildTranscodeUrl = (baseUrl: string, startOffset: number, mode: 'remux' | 'full') => {
@@ -227,34 +210,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleError = () => {
       if (isTranscoding && streamMode === 'remux') {
-        console.warn('[VideoPlayer]: Remux stream playback failed. Auto-fallback to Full Transcode compatibility mode.');
-        setStreamNotice('⚠️ Browser cannot decode H.265 directly. Switched to Full Transcode mode.');
+        console.warn('[VideoPlayer]: Remux stream playback failed on this browser. Auto-fallback to Full Transcode compatibility mode.');
+        setStreamNotice('⚠️ 浏览器无法直接播放 H.265 直推流，已自动切换为【兼容转码】模式');
         setTimeout(() => setStreamNotice(null), 5000);
         setStreamMode('full');
       }
     };
 
-    // Detect silent decoder stall on incompatible H.265 files in Chrome/Edge
-    let stallTimer: number | null = null;
-    if (isTranscoding && streamMode === 'remux') {
-      stallTimer = window.setTimeout(() => {
-        if (video && video.currentTime === 0) {
-          setShowCompatibilityPrompt(true);
-        }
-      }, 3500);
-    }
-
-    const handlePlaying = () => {
-      setShowCompatibilityPrompt(false);
-    };
-
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('playing', handlePlaying);
     video.addEventListener('error', handleError);
     return () => {
-      if (stallTimer) clearTimeout(stallTimer);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('error', handleError);
     };
   }, [episodeId, videoUrl, durationMetadata, streamMode]);
@@ -660,58 +626,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           fontWeight: 500
         }}>
           {streamNotice}
-        </div>
-      )}
-
-      {/* Compatibility Recovery Modal when browser lacks H.265 10-bit decoder */}
-      {showCompatibilityPrompt && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          background: 'rgba(15, 23, 42, 0.95)',
-          border: '1px solid rgba(245, 158, 11, 0.5)',
-          padding: '24px',
-          borderRadius: '16px',
-          zIndex: 110,
-          maxWidth: '480px',
-          width: '90%',
-          textAlign: 'center',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.8)',
-          backdropFilter: 'blur(12px)',
-          color: '#f8fafc'
-        }}>
-          <div style={{ fontSize: '2rem', marginBottom: '8px' }}>⚠️</div>
-          <h4 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '8px' }}>
-            浏览器无法直接解码 4K 10-bit H.265
-          </h4>
-          <p style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '20px' }}>
-            当前浏览器缺乏 H.265 (HEVC Main 10) 硬件解码支持导致黑屏。<br />
-            您可以一键切换到 <strong>兼容转码</strong> 模式，或使用本地播放器原画秒开：
-          </p>
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                setShowCompatibilityPrompt(false);
-                setStreamMode('full');
-                setStreamNotice('⚙️ 已切换至【兼容转码】模式 (H.264)');
-                setTimeout(() => setStreamNotice(null), 4000);
-              }}
-              style={{ padding: '8px 18px', fontSize: '0.85rem' }}
-            >
-              ⚙️ 切换到兼容转码 (推荐)
-            </button>
-            <a
-              href={`vlc://${window.location.origin}/api/stream/${episodeId}`}
-              className="btn btn-secondary"
-              style={{ padding: '8px 18px', fontSize: '0.85rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-            >
-              📺 在 VLC / IINA 打开
-            </a>
-          </div>
         </div>
       )}
 
