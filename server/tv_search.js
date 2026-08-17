@@ -40,15 +40,22 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
           const rawEp = parseInt(t.episode, 10);
           const epNum = isNaN(rawEp) || rawEp === 0 ? 'Season_Pack' : String(rawEp).padStart(2, '0');
 
+          const is4k = /2160p|4k/i.test(t.title);
+          const is1080p = /1080p/i.test(t.title) && !is4k;
+          const is720p = /720p/i.test(t.title);
+          const isHevc = /x265|hevc|h\.?265/i.test(t.title);
+          const isH264 = (/x264|h\.?264|avc/i.test(t.title) || (!isHevc && !is4k)) && !isHevc;
+
           allRawEpisodes.push({
             rawTitle: t.title,
             episodeNum: epNum,
             cleanEpisodeName: epNum === 'Season_Pack' ? `Season ${seasonNumber} Complete Pack` : `Episode ${epNum}`,
             seasonNumber,
-            is1080p: /1080p/i.test(t.title),
-            is720p: /720p/i.test(t.title),
-            isH264: /x264|h\.?264|avc/i.test(t.title) && !/x265|hevc|h\.?265/i.test(t.title),
-            isHevc: /x265|hevc|h\.?265/i.test(t.title),
+            is4k,
+            is1080p,
+            is720p,
+            isH264,
+            isHevc,
             downloadUrl: t.magnet_url || t.torrent_url,
             sizeMb: (t.size_bytes / (1024 * 1024)).toFixed(1),
             seeds: t.seeds || 0
@@ -106,15 +113,22 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
               epNum = epMatch[2].padStart(2, '0');
             }
 
+            const is4k = /2160p|4k/i.test(t.name);
+            const is1080p = /1080p/i.test(t.name) && !is4k;
+            const is720p = /720p/i.test(t.name);
+            const isHevc = /x265|hevc|h\.?265/i.test(t.name);
+            const isH264 = (/x264|h264|h\.264|avc/i.test(t.name) || (!isHevc && !is4k)) && !isHevc;
+
             allRawEpisodes.push({
               rawTitle: t.name,
               episodeNum: epNum,
               cleanEpisodeName: epNum === 'Season_Pack' ? `Season ${seasonNumber} Complete Pack` : `Episode ${epNum}`,
               seasonNumber,
-              is1080p: /1080p/i.test(t.name),
-              is720p: /720p/i.test(t.name),
-              isH264: /x264|h264|h\.264|avc/i.test(t.name) && !/x265|hevc|h\.?265/i.test(t.name),
-              isHevc: /x265|hevc|h265/i.test(t.name),
+              is4k,
+              is1080p,
+              is720p,
+              isH264,
+              isHevc,
               downloadUrl: magnet,
               sizeMb: (parseInt(t.size, 10) / (1024 * 1024)).toFixed(1),
               seeds: parseInt(t.seeders, 10) || 0
@@ -139,24 +153,41 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
     }
   }
 
-  // Sort releases inside each episode (Seeds > Resolution)
+  // Sort releases inside each episode:
+  // Prefer standard Web-DL / HDTV (400MB - 1800MB) > BluRay Remux (3500MB+) > 4K, then Seeds
   for (const epNum of Object.keys(allReleasesByEpisode)) {
     allReleasesByEpisode[epNum].sort((a, b) => {
-      if (a.is1080p !== b.is1080p) return b.is1080p ? 1 : -1;
-      return (b.seeds || 0) - (a.seeds || 0);
+      const getEpScore = (item) => {
+        let score = 0;
+        const size = parseFloat(item.sizeMb || '0');
+        if (item.is1080p) score += 100;
+        else if (item.is720p) score += 80;
+        else if (item.is4k) score += 40; // 4K only as dedicated fallback
+        else score += 50;
+
+        if (item.isH264) score += 20;
+
+        // Size sweet spot for a single episode: 300MB - 1800MB
+        if (size >= 300 && size <= 1800) score += 30;
+        else if (size > 3500) score -= 20; // Penalize massive remuxes
+
+        score += Math.min(item.seeds || 0, 20);
+        return score;
+      };
+      return getEpScore(b) - getEpScore(a);
     });
   }
 
-  // 4. Build Cohesive Release Packages (Profiles)
+  // 4. Build Strict Cohesive Release Packages (Profiles)
   const packageConfigs = [
     {
       id: '1080p_h264',
-      name: '⚡ 1080p H.264 (Recommended)',
+      name: '⚡ 1080p H.264',
       desc: '1080p H.264 · ⚡ 2s Remux / Native Direct Play',
       badge: '⚡ Fast Remux',
       badgeColor: 'green',
-      filter: (item) => item.is1080p && item.isH264,
-      fallbackFilter: (item) => item.isH264 || item.is1080p
+      match: (item) => !item.is4k && item.isH264 && item.is1080p,
+      fallback: (item) => !item.is4k && item.isH264
     },
     {
       id: '1080p_hevc',
@@ -164,8 +195,8 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       desc: '1080p HEVC · 50% Space Saving / High Efficiency',
       badge: '🔥 Compact Size',
       badgeColor: 'purple',
-      filter: (item) => item.is1080p && item.isHevc,
-      fallbackFilter: (item) => item.isHevc || item.is1080p
+      match: (item) => !item.is4k && item.isHevc && item.is1080p,
+      fallback: (item) => !item.is4k && item.isHevc
     },
     {
       id: '720p_h264',
@@ -173,8 +204,8 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       desc: '720p H.264 · Ultra-Fast Download / Low Bandwidth',
       badge: '⚡ Fast Download',
       badgeColor: 'blue',
-      filter: (item) => item.is720p && item.isH264,
-      fallbackFilter: (item) => item.is720p || item.isH264
+      match: (item) => !item.is4k && item.isH264 && item.is720p,
+      fallback: (item) => !item.is4k && item.isH264
     },
     {
       id: '720p_hevc',
@@ -182,8 +213,17 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       desc: '720p HEVC · Minimal Storage Footprint',
       badge: '🔥 Ultra-Light',
       badgeColor: 'indigo',
-      filter: (item) => item.is720p && item.isHevc,
-      fallbackFilter: (item) => item.isHevc
+      match: (item) => !item.is4k && item.isHevc && item.is720p,
+      fallback: (item) => !item.is4k && item.isHevc
+    },
+    {
+      id: '4k_uhd',
+      name: '🎬 4K UHD (2160p)',
+      desc: '4K 2160p Ultra HD · High Bitrate',
+      badge: '🎬 4K UHD',
+      badgeColor: 'amber',
+      match: (item) => item.is4k,
+      fallback: (item) => item.is4k
     }
   ];
 
@@ -200,15 +240,9 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       const candidates = allReleasesByEpisode[epNum];
       if (!candidates || candidates.length === 0) continue;
 
-      // 1. Exact package criteria match
-      let chosen = candidates.find(config.filter);
-      // 2. Coherent fallback criteria
-      if (!chosen && config.fallbackFilter) {
-        chosen = candidates.find(config.fallbackFilter);
-      }
-      // 3. Fallback to best available
-      if (!chosen) {
-        chosen = candidates[0];
+      let chosen = candidates.find(config.match);
+      if (!chosen && config.fallback) {
+        chosen = candidates.find(config.fallback);
       }
 
       if (chosen) {
@@ -217,7 +251,8 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       }
     }
 
-    if (pkgEpisodes.length > 0) {
+    // STRICT: Only include package if it covers at least 60% of available season episodes
+    if (pkgEpisodes.length >= Math.max(1, individualEpisodeNums.length * 0.6)) {
       packages.push({
         id: config.id,
         name: config.name,
@@ -234,6 +269,14 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
   // Include Season Packs package if season pack torrents exist
   const seasonPacks = allReleasesByEpisode['Season_Pack'] || [];
   if (seasonPacks.length > 0) {
+    seasonPacks.sort((a, b) => {
+      const sizeA = parseFloat(a.sizeMb || '0');
+      const sizeB = parseFloat(b.sizeMb || '0');
+      const scoreA = (a.seeds || 0) + (sizeA >= 1000 && sizeA <= 12000 ? 200 : 0);
+      const scoreB = (b.seeds || 0) + (sizeB >= 1000 && sizeB <= 12000 ? 200 : 0);
+      return scoreB - scoreA;
+    });
+
     packages.push({
       id: 'season_packs',
       name: '📦 Season Complete Packs',
@@ -241,13 +284,23 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
       badge: '📦 Full Season Pack',
       badgeColor: 'amber',
       episodeCount: seasonPacks.length,
-      totalSizeMb: Math.round(seasonPacks.reduce((acc, p) => acc + parseFloat(p.sizeMb || '0'), 0) / seasonPacks.length),
+      totalSizeMb: Math.round(seasonPacks[0] ? parseFloat(seasonPacks[0].sizeMb || '0') : 0),
       episodes: seasonPacks
     });
   }
 
-  // Select default package (favor 1080p H.264 if available, otherwise first package)
-  const defaultPkg = packages.find(p => p.id === '1080p_h264') || packages[0];
+  // Smart Default Selection:
+  // 1. 1080p H.264 if available
+  // 2. 1080p HEVC if available
+  // 3. 720p H.264 if available
+  // 4. Season Packs (prioritized over 4K UHD to avoid huge 40GB default downloads)
+  // 5. 4K UHD
+  let defaultPkg = packages.find(p => p.id === '1080p_h264')
+    || packages.find(p => p.id === '1080p_hevc')
+    || packages.find(p => p.id === '720p_h264')
+    || packages.find(p => p.id === 'season_packs')
+    || packages[0];
+
   const defaultEpisodes = defaultPkg ? defaultPkg.episodes : [];
 
   console.log(`[Western TV Search]: Resolved ${packages.length} packages for "${englishTitle}" Season ${seasonNumber} (Default: ${defaultPkg?.name}, ${defaultEpisodes.length} episodes)`);
