@@ -84,6 +84,57 @@ function saveMetadataCache() {
   }
 }
 
+// Persistent Full Library Cache to allow instantaneous (0ms) page loading
+const LIBRARY_CACHE_FILE = path.join(__dirname, 'library_cache.json');
+let cachedLibrary = null;
+let isScanningLibrary = false;
+let lastLibraryScanTime = 0;
+
+function loadLibraryCache() {
+  if (cachedLibrary) return;
+  if (fs.existsSync(LIBRARY_CACHE_FILE)) {
+    try {
+      cachedLibrary = JSON.parse(fs.readFileSync(LIBRARY_CACHE_FILE, 'utf8'));
+      console.log(`[Library Cache]: Loaded ${cachedLibrary.length} albums from disk cache (${LIBRARY_CACHE_FILE}).`);
+    } catch (e) {
+      console.error('Error reading library cache, will scan fresh:', e.message);
+      cachedLibrary = null;
+    }
+  }
+}
+
+function saveLibraryCache(shows) {
+  try {
+    fs.writeFileSync(LIBRARY_CACHE_FILE, JSON.stringify(shows, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving library cache:', e.message);
+  }
+}
+
+function refreshLibraryInBackground(force = false) {
+  if (isScanningLibrary) return;
+  const now = Date.now();
+  if (!force && now - lastLibraryScanTime < 10000) return; // Throttled to max once per 10s
+
+  isScanningLibrary = true;
+  setImmediate(() => {
+    try {
+      const currentSettings = getSettings();
+      if (currentSettings.videoDir && fs.existsSync(currentSettings.videoDir)) {
+        const fresh = scanLibrary(currentSettings.videoDir);
+        cachedLibrary = fresh;
+        saveLibraryCache(fresh);
+        lastLibraryScanTime = Date.now();
+        console.log(`[Library Background Refresh]: Completed. Total ${fresh.length} albums synced.`);
+      }
+    } catch (err) {
+      console.error('[Library Background Refresh]: Error:', err.message);
+    } finally {
+      isScanningLibrary = false;
+    }
+  });
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -540,11 +591,27 @@ app.post('/api/qbittorrent/test', async (req, res) => {
   }
 });
 
-// Get catalog lists
+// Get catalog lists (Instant cache with background refresh)
 app.get('/api/library', (req, res) => {
   const settings = getSettings();
-  const library = scanLibrary(settings.videoDir);
-  res.json(library);
+  const force = req.query.refresh === 'true';
+
+  loadLibraryCache();
+
+  // 1. Instant Cache Hit: Return immediately in <1ms
+  if (cachedLibrary && !force) {
+    res.json(cachedLibrary);
+    // Background non-blocking scan to check for new files/episodes
+    refreshLibraryInBackground(false);
+    return;
+  }
+
+  // 2. Cache Miss or Force Refresh
+  const fresh = scanLibrary(settings.videoDir);
+  cachedLibrary = fresh;
+  saveLibraryCache(fresh);
+  lastLibraryScanTime = Date.now();
+  res.json(fresh);
 });
 
 // Trigger library optimization manually
@@ -1747,6 +1814,10 @@ app.listen(settings.port, '0.0.0.0', () => {
     console.log(`  http://${ip}:${settings.port}`);
   });
   console.log(`  http://localhost:${settings.port}`);
+
+  // Initialize instant library cache and trigger background sync
+  loadLibraryCache();
+  refreshLibraryInBackground(true);
 
   // Trigger initial library preprocessing scan on startup
   spawnPreprocessJob();

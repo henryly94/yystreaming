@@ -56,13 +56,28 @@ interface OptimizeProgress {
 }
 
 export default function App() {
-  const [library, setLibrary] = useState<Show[]>([]);
+  const [library, setLibrary] = useState<Show[]>(() => {
+    try {
+      const cached = localStorage.getItem('yystreaming_library_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [settings, setSettings] = useState<Settings | null>(null);
   const [selectedShow, setSelectedShow] = useState<Show | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<Episode | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      const cached = localStorage.getItem('yystreaming_library_cache');
+      return !cached || JSON.parse(cached).length === 0;
+    } catch (e) {
+      return true;
+    }
+  });
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [optimizeProgress, setOptimizeProgress] = useState<OptimizeProgress | null>(null);
@@ -207,15 +222,26 @@ export default function App() {
     return isCurrentlyEncoding || isQueued;
   };
 
-  const fetchLibrary = async () => {
+  const fetchLibrary = async (forceRefresh = false) => {
     try {
-      const res = await fetch('/api/library');
+      if (forceRefresh) setIsRefreshing(true);
+      const url = forceRefresh ? '/api/library?refresh=true' : '/api/library';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setLibrary(data);
+        try {
+          localStorage.setItem('yystreaming_library_cache', JSON.stringify(data));
+        } catch (e) {}
+        if (forceRefresh) {
+          showToast('✨ Library resynced with storage.');
+        }
       }
     } catch (err) {
       console.error('Failed to fetch library:', err);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -233,8 +259,8 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      setIsLoading(true);
-      await Promise.all([fetchLibrary(), fetchSettings()]);
+      // Non-blocking parallel load: if cached data already exists, UI is already visible
+      await Promise.all([fetchLibrary(false), fetchSettings()]);
       setIsLoading(false);
     };
     init();
@@ -445,12 +471,22 @@ export default function App() {
           </div>
         )}
 
-        <div className="nav-actions" style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-primary" onClick={() => setIsRssModalOpen(true)}>
-            <Sparkles size={16} />
-            Track Anime
+        <div className="nav-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => fetchLibrary(true)}
+            disabled={isRefreshing}
+            title="Scan storage disk for newly added files"
+            style={{ padding: '6px 10px', height: '36px' }}
+          >
+            <RefreshCw size={15} className={isRefreshing ? "spin" : ""} />
+            <span style={{ fontSize: '0.8rem' }}>{isRefreshing ? 'Scanning...' : 'Rescan'}</span>
           </button>
-          <button className="btn" onClick={() => setIsSettingsOpen(true)}>
+          <button className="btn btn-primary" onClick={() => setIsRssModalOpen(true)} style={{ height: '36px' }}>
+            <Sparkles size={16} />
+            Track Media
+          </button>
+          <button className="btn" onClick={() => setIsSettingsOpen(true)} style={{ height: '36px' }}>
             <SettingsIcon size={16} />
             Settings
           </button>
@@ -1070,7 +1106,7 @@ export default function App() {
                     </button>
                     <button 
                       className="btn" 
-                      onClick={fetchLibrary}
+                      onClick={() => fetchLibrary(true)}
                     >
                       <RefreshCw size={14} /> Check Again
                     </button>
