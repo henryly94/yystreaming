@@ -175,25 +175,6 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
-  const applySubtitleFilter = (filter: 'all' | 'chs' | 'cht' | 'eng') => {
-    setSubtitleFilter(filter);
-    if (filter === 'all') return;
-
-    // Auto pick candidate in allReleasesByEpisode that matches the subtitle
-    setTvEpisodes(prev => {
-      return prev.map(ep => {
-        const candidates = allReleasesByEpisode[ep.episodeNum] || [];
-        const match = candidates.find(c => {
-          if (filter === 'chs') return c.subtitles?.isChs;
-          if (filter === 'cht') return c.subtitles?.isCht;
-          if (filter === 'eng') return c.subtitles?.isEng;
-          return true;
-        });
-        return match || ep;
-      });
-    });
-  };
-
   // Direct / Selected RSS state
   const [rssUrl, setRssUrl] = useState("");
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -1253,50 +1234,107 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
               )}
 
               {/* Subtitle Filter Selector for TV Shows */}
-              <div style={{ display: "flex", gap: "8px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Subtitle Language (字幕筛选):</span>
-                {([
-                  { key: 'all', label: '🌐 All (全部)' },
-                  { key: 'chs', label: '🇨🇳 简体中文' },
-                  { key: 'cht', label: '🇭🇰 繁体中文' },
-                  { key: 'eng', label: '🇺🇸 English (英文)' }
-                ] as const).map(f => (
-                  <button
-                    key={f.key}
-                    type="button"
-                    onClick={() => applySubtitleFilter(f.key)}
-                    style={{
-                      padding: "3px 10px",
-                      fontSize: "0.75rem",
-                      borderRadius: "14px",
-                      border: "1px solid",
-                      borderColor: subtitleFilter === f.key ? "var(--primary)" : "var(--border-light)",
-                      background: subtitleFilter === f.key ? "rgba(99, 102, 241, 0.2)" : "transparent",
-                      color: subtitleFilter === f.key ? "var(--primary)" : "var(--text-muted)",
-                      cursor: "pointer",
-                      fontWeight: subtitleFilter === f.key ? 600 : 400
-                    }}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                // Compute total unique episodes/releases matching each language across allReleasesByEpisode
+                const allEpsList = Object.values(allReleasesByEpisode).flat();
+                const countAll = allEpsList.length;
+                const countChs = allEpsList.filter(e => e.subtitles?.isChs || e.subtitles?.isBilingual).length;
+                const countCht = allEpsList.filter(e => e.subtitles?.isCht || e.subtitles?.isBilingual).length;
+                const countEng = allEpsList.filter(e => e.subtitles?.isEng).length;
 
-              <div style={{ marginBottom: "14px" }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>Episodes Preview ({tvEpisodes.length} Episodes)</span>
-                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                    Click 🔄 on any episode to switch release
-                  </span>
-                </div>
+                return (
+                  <div style={{ display: "flex", gap: "8px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Subtitle Language (字幕筛选):</span>
+                    {([
+                      { key: 'all', label: `🌐 All 全部 (${countAll})` },
+                      { key: 'chs', label: `🇨🇳 简体中文 (${countChs})` },
+                      { key: 'cht', label: `🇭🇰 繁体中文 (${countCht})` },
+                      { key: 'eng', label: `🇺🇸 English (${countEng})` }
+                    ] as const).map(f => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        onClick={() => setSubtitleFilter(f.key)}
+                        style={{
+                          padding: "4px 12px",
+                          fontSize: "0.75rem",
+                          borderRadius: "14px",
+                          border: "1px solid",
+                          borderColor: subtitleFilter === f.key ? "var(--primary)" : "var(--border-light)",
+                          background: subtitleFilter === f.key ? "rgba(99, 102, 241, 0.25)" : "transparent",
+                          color: subtitleFilter === f.key ? "#a5b4fc" : "var(--text-muted)",
+                          cursor: "pointer",
+                          fontWeight: subtitleFilter === f.key ? 600 : 400,
+                          transition: "all 0.15s ease"
+                        }}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
 
-                <div style={{ maxHeight: "280px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
-                  {tvEpisodes.length === 0 ? (
-                    <div style={{ padding: "20px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
-                      No episodes found for this season.
+              {(() => {
+                // Compute displayed episodes based on active subtitle filter
+                let displayedTvEpisodes: ParsedEpisode[] = [];
+
+                if (subtitleFilter === 'all') {
+                  displayedTvEpisodes = tvEpisodes;
+                } else {
+                  // 1. Try to find matching candidates in current package / tvEpisodes
+                  const fromCurrentPackage = tvEpisodes.map(ep => {
+                    const candidates = allReleasesByEpisode[ep.episodeNum] || [];
+                    const match = candidates.find(c => {
+                      if (subtitleFilter === 'chs') return c.subtitles?.isChs || c.subtitles?.isBilingual;
+                      if (subtitleFilter === 'cht') return c.subtitles?.isCht || c.subtitles?.isBilingual;
+                      if (subtitleFilter === 'eng') return c.subtitles?.isEng;
+                      return true;
+                    });
+                    return match || ep;
+                  }).filter(ep => {
+                    if (subtitleFilter === 'chs') return ep.subtitles?.isChs || ep.subtitles?.isBilingual;
+                    if (subtitleFilter === 'cht') return ep.subtitles?.isCht || ep.subtitles?.isBilingual;
+                    if (subtitleFilter === 'eng') return ep.subtitles?.isEng;
+                    return true;
+                  });
+
+                  if (fromCurrentPackage.length > 0) {
+                    displayedTvEpisodes = fromCurrentPackage;
+                  } else {
+                    // 2. If current package didn't have matches, search ALL candidates across allReleasesByEpisode (including Season Packs)
+                    const fromAllCandidates: ParsedEpisode[] = [];
+                    for (const [_epNum, list] of Object.entries(allReleasesByEpisode)) {
+                      const match = list.find(c => {
+                        if (subtitleFilter === 'chs') return c.subtitles?.isChs || c.subtitles?.isBilingual;
+                        if (subtitleFilter === 'cht') return c.subtitles?.isCht || c.subtitles?.isBilingual;
+                        if (subtitleFilter === 'eng') return c.subtitles?.isEng;
+                        return false;
+                      });
+                      if (match && !fromAllCandidates.some(x => x.downloadUrl === match.downloadUrl)) {
+                        fromAllCandidates.push(match);
+                      }
+                    }
+                    displayedTvEpisodes = fromAllCandidates;
+                  }
+                }
+
+                return (
+                  <div style={{ marginBottom: "14px" }}>
+                    <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>Episodes Preview ({displayedTvEpisodes.length} Episodes)</span>
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                        Click 🔄 on any episode to switch release
+                      </span>
                     </div>
-                  ) : (
-                    tvEpisodes.map(ep => {
+
+                    <div style={{ maxHeight: "280px", overflowY: "auto", background: "var(--surface-hover)", borderRadius: "8px", padding: "8px", border: "1px solid var(--border-light)" }}>
+                      {displayedTvEpisodes.length === 0 ? (
+                        <div style={{ padding: "24px", textAlign: "center", color: "var(--text-dim)", fontSize: "0.85rem" }}>
+                          No episodes matching the <strong>{subtitleFilter.toUpperCase()}</strong> subtitle filter found for this season.
+                        </div>
+                      ) : (
+                        displayedTvEpisodes.map(ep => {
                       const isPack = ep.episodeNum === 'Season_Pack';
                       const alternatives = (allReleasesByEpisode[ep.episodeNum] || []).filter(a => a.downloadUrl !== ep.downloadUrl);
                       const isExpanded = expandedEpisodeNum === ep.episodeNum;
@@ -1482,6 +1520,8 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                   )}
                 </div>
               </div>
+            );
+          })()}
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "16px" }}>
                 <button type="button" className="btn btn-secondary" onClick={onClose}>
