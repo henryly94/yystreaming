@@ -422,15 +422,18 @@ async function main() {
       srtFileName = item.baseName + '.srt';
       console.log(`  -> Found subtitle stream (index ${subtitleStream.index}). Extracting...`);
       try {
-        // Extract the subtitle stream to .srt using relative paths
-        execSync(`"${ffmpegCmd}" -y -i "${item.fileName}" -map 0:${subtitleStream.index} "${srtFileName}"`, { 
+        // Extract the subtitle stream to .srt using relative paths without reading full video/audio
+        execSync(`"${ffmpegCmd}" -y -i "${item.fileName}" -map 0:${subtitleStream.index} -vn -an -c:s srt "${srtFileName}"`, { 
           cwd: item.directory,
-          stdio: 'ignore' 
+          stdio: 'ignore',
+          timeout: 20000
         });
-        hasSrt = true;
-        console.log(`  -> Extracted subtitle: ${srtFileName}`);
+        if (fs.existsSync(path.join(item.directory, srtFileName)) && fs.statSync(path.join(item.directory, srtFileName)).size > 10) {
+          hasSrt = true;
+          console.log(`  -> Extracted subtitle: ${srtFileName}`);
+        }
       } catch (subErr) {
-        console.error(`  -> Warning: Subtitle extraction failed:`, subErr.message);
+        console.error(`  -> Warning: Subtitle extraction failed or timed out:`, subErr.message);
       }
     }
 
