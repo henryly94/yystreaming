@@ -969,7 +969,6 @@ app.get('/api/transcode/:episodeId', (req, res) => {
     const responseHeaders = {
       'Content-Type': 'video/mp4',
       'Accept-Ranges': 'bytes',
-      'Transfer-Encoding': 'chunked',
       'Access-Control-Allow-Origin': '*'
     };
 
@@ -988,7 +987,13 @@ app.get('/api/transcode/:episodeId', (req, res) => {
       ffmpegArgs.push('-ss', startTime.toString());
     }
 
-    ffmpegArgs.push('-i', safeVideoPath);
+    ffmpegArgs.push(
+      '-i', safeVideoPath,
+      '-map', '0:v:0',
+      '-map', '0:a:0?',
+      '-sn',
+      '-dn'
+    );
 
     if (mode === 'full') {
       // Full re-encoding for legacy / incompatible client browsers
@@ -1014,7 +1019,7 @@ app.get('/api/transcode/:episodeId', (req, res) => {
 
     ffmpegArgs.push(
       '-f', 'mp4',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       'pipe:1'
     );
 
@@ -1023,22 +1028,7 @@ app.get('/api/transcode/:episodeId', (req, res) => {
 
     activeTranscodeProcesses.set(episodeId, ffmpegProcess);
 
-    // Pipe stdout, discarding the first 'start' bytes if requested (handles partial range seek offsets from Safari)
-    let bytesDiscarded = 0;
-    ffmpegProcess.stdout.on('data', (chunk) => {
-      if (bytesDiscarded < start) {
-        const needed = start - bytesDiscarded;
-        if (chunk.length <= needed) {
-          bytesDiscarded += chunk.length;
-        } else {
-          const sliced = chunk.slice(needed);
-          bytesDiscarded = start;
-          res.write(sliced);
-        }
-      } else {
-        res.write(chunk);
-      }
-    });
+    ffmpegProcess.stdout.pipe(res);
 
     ffmpegProcess.stdout.on('end', () => {
       res.end();
