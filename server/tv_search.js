@@ -1,6 +1,61 @@
 // Multi-Channel TV & Drama Torrent Search Engine (EZTV + APIBay + DMHY)
 
 /**
+ * Standardized subtitle metadata parser
+ */
+export function parseSubtitleInfo(rawTitle) {
+  const t = rawTitle || '';
+  
+  // 1. Simplified Chinese
+  const isChs = /简[体中日]|CHS|GB|GBK|ZH[-_]CN|ZH[-_]HANS|Chi_Sim|简体|内嵌简|内封简/i.test(t);
+  
+  // 2. Traditional Chinese
+  const isCht = /繁[体中日]|CHT|BIG5|ZH[-_]TW|ZH[-_]HK|ZH[-_]HANT|Chi_Tra|繁体|内嵌繁|内封繁/i.test(t);
+  
+  // 3. Bilingual / Multi
+  const isBilingual = /双语|中英|中日|简日|繁日|DualSub/i.test(t);
+  const isMulti = /Multi(?:sub|[-_]sub)|多语字幕|多国语言/i.test(t);
+  
+  // Generic Chinese Match
+  const isGenericChinese = /中字|中文字幕|国语|国英/i.test(t) || isChs || isCht || isBilingual;
+  
+  // 4. English
+  const isEng = /\b(?:ENG|English|Subbed|EN[-_]US|En[-_]Sub|English\s*Sub(?:titles?)?)\b/i.test(t) || isMulti || /ENG[-_]/i.test(t);
+  
+  // 5. Raw / No sub
+  const isRaw = /\b(?:RAW|RAWS|NCED|NCOP)\b/i.test(t) && !isGenericChinese && !isEng;
+
+  const badges = [];
+  if (isBilingual) {
+    badges.push({ code: 'bilingual', label: '🌐 中英双语', color: 'emerald' });
+  } else {
+    if (isChs) badges.push({ code: 'chs', label: '🇨🇳 简中', color: 'green' });
+    if (isCht) badges.push({ code: 'cht', label: '🇭🇰 繁中', color: 'purple' });
+    if (isGenericChinese && !isChs && !isCht) badges.push({ code: 'chs', label: '🇨🇳 中字', color: 'green' });
+  }
+
+  if (isMulti) {
+    badges.push({ code: 'multi', label: '🌐 多国字幕', color: 'indigo' });
+  } else if (isEng && !isBilingual) {
+    badges.push({ code: 'eng', label: '🇺🇸 英文', color: 'blue' });
+  }
+
+  if (isRaw) {
+    badges.push({ code: 'raw', label: '🈳 RAW生肉', color: 'gray' });
+  }
+
+  return {
+    isChs: isChs || isBilingual || (isGenericChinese && !isCht),
+    isCht: isCht || (isBilingual && isCht),
+    isEng: isEng || isBilingual || isMulti,
+    isBilingual,
+    isMulti,
+    isRaw,
+    badges
+  };
+}
+
+/**
  * Search Western TV torrents using EZTV API (with multi-page pagination) + APIBay multi-source engine
  */
 export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber = 1) {
@@ -45,6 +100,7 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
           const is720p = /720p/i.test(t.title);
           const isHevc = /x265|hevc|h\.?265/i.test(t.title);
           const isH264 = (/x264|h\.?264|avc/i.test(t.title) || (!isHevc && !is4k)) && !isHevc;
+          const subInfo = parseSubtitleInfo(t.title);
 
           allRawEpisodes.push({
             rawTitle: t.title,
@@ -56,6 +112,7 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
             is720p,
             isH264,
             isHevc,
+            subtitles: subInfo,
             downloadUrl: t.magnet_url || t.torrent_url,
             sizeMb: (t.size_bytes / (1024 * 1024)).toFixed(1),
             seeds: t.seeds || 0

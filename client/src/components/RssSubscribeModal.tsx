@@ -1,6 +1,22 @@
 import React, { useState, useRef, useMemo } from "react";
 import { X, Rss, Search, Sparkles, Film, ArrowLeft, Zap, AlertCircle, RefreshCw, Layers, Tv, Star, Clock, DownloadCloud } from "lucide-react";
 
+interface SubtitleBadge {
+  code: string;
+  label: string;
+  color: string;
+}
+
+interface SubtitleInfo {
+  isChs?: boolean;
+  isCht?: boolean;
+  isEng?: boolean;
+  isBilingual?: boolean;
+  isMulti?: boolean;
+  isRaw?: boolean;
+  badges: SubtitleBadge[];
+}
+
 interface ParsedEpisode {
   rawTitle: string;
   episodeNum: string;
@@ -9,11 +25,13 @@ interface ParsedEpisode {
   isHevc?: boolean;
   is1080p: boolean;
   is720p?: boolean;
+  is4k?: boolean;
   downloadUrl: string;
   allReleasesCount?: number;
   seasonNumber?: number;
   sizeMb?: string;
   seeds?: number;
+  subtitles?: SubtitleInfo;
 }
 
 interface ReleasePackage {
@@ -102,6 +120,7 @@ interface MovieRelease {
   peers: number;
   downloadUrl: string;
   source: string;
+  subtitles?: SubtitleInfo;
 }
 
 interface TmdbMovieDetails {
@@ -152,8 +171,28 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
   const [selectedPackageId, setSelectedPackageId] = useState<string>('1080p_h264');
   const [allReleasesByEpisode, setAllReleasesByEpisode] = useState<Record<string, ParsedEpisode[]>>({});
   const [expandedEpisodeNum, setExpandedEpisodeNum] = useState<string | null>(null);
+  const [subtitleFilter, setSubtitleFilter] = useState<'all' | 'chs' | 'cht' | 'eng'>('all');
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+
+  const applySubtitleFilter = (filter: 'all' | 'chs' | 'cht' | 'eng') => {
+    setSubtitleFilter(filter);
+    if (filter === 'all') return;
+
+    // Auto pick candidate in allReleasesByEpisode that matches the subtitle
+    setTvEpisodes(prev => {
+      return prev.map(ep => {
+        const candidates = allReleasesByEpisode[ep.episodeNum] || [];
+        const match = candidates.find(c => {
+          if (filter === 'chs') return c.subtitles?.isChs;
+          if (filter === 'cht') return c.subtitles?.isCht;
+          if (filter === 'eng') return c.subtitles?.isEng;
+          return true;
+        });
+        return match || ep;
+      });
+    });
+  };
 
   // Direct / Selected RSS state
   const [rssUrl, setRssUrl] = useState("");
@@ -904,10 +943,45 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 </div>
               </div>
 
+              {/* Subtitle Filter Selector for Movies */}
+              <div style={{ display: "flex", gap: "8px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Subtitle Language (字幕筛选):</span>
+                {([
+                  { key: 'all', label: '🌐 All (全部)' },
+                  { key: 'chs', label: '🇨🇳 简体中文' },
+                  { key: 'cht', label: '🇭🇰 繁体中文' },
+                  { key: 'eng', label: '🇺🇸 English (英文)' }
+                ] as const).map(f => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => setSubtitleFilter(f.key)}
+                    style={{
+                      padding: "3px 10px",
+                      fontSize: "0.75rem",
+                      borderRadius: "14px",
+                      border: "1px solid",
+                      borderColor: subtitleFilter === f.key ? "var(--primary)" : "var(--border-light)",
+                      background: subtitleFilter === f.key ? "rgba(99, 102, 241, 0.2)" : "transparent",
+                      color: subtitleFilter === f.key ? "var(--primary)" : "var(--text-muted)",
+                      cursor: "pointer",
+                      fontWeight: subtitleFilter === f.key ? 600 : 400
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
               <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>Available Quality Releases ({movieReleases.length})</span>
+                <span>Available Quality Releases ({movieReleases.filter(rel => {
+                  if (subtitleFilter === 'chs') return rel.subtitles?.isChs;
+                  if (subtitleFilter === 'cht') return rel.subtitles?.isCht;
+                  if (subtitleFilter === 'eng') return rel.subtitles?.isEng;
+                  return true;
+                }).length})</span>
                 <span style={{ fontSize: "0.75rem", color: "#4ade80", display: "flex", alignItems: "center", gap: "4px" }}>
-                  <Zap size={12} /> YTS High-Speed Direct-Play Verified
+                  <Zap size={12} /> Direct-Play Verified
                 </span>
               </div>
 
@@ -917,7 +991,12 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 </div>
               ) : (
                 <div style={{ maxHeight: "240px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {movieReleases.map((rel, idx) => (
+                  {movieReleases.filter(rel => {
+                    if (subtitleFilter === 'chs') return rel.subtitles?.isChs;
+                    if (subtitleFilter === 'cht') return rel.subtitles?.isCht;
+                    if (subtitleFilter === 'eng') return rel.subtitles?.isEng;
+                    return true;
+                  }).map((rel, idx) => (
                     <div
                       key={idx}
                       style={{
@@ -931,32 +1010,56 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                       }}
                     >
                       <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px", flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 600, color: "var(--text-main)", fontSize: "0.88rem" }}>
                             {rel.quality} {rel.type}
                           </span>
                           {rel.is1080p && (
-                            <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.7rem", padding: "1px 6px" }}>
+                            <span className="badge" style={{ background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", fontSize: "0.68rem", padding: "1px 5px" }}>
                               1080p BluRay
                             </span>
                           )}
                           {rel.is720p && (
-                            <span className="badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", fontSize: "0.7rem", padding: "1px 6px" }}>
+                            <span className="badge" style={{ background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7", fontSize: "0.68rem", padding: "1px 5px" }}>
                               720p
                             </span>
                           )}
                           {rel.is4k && (
-                            <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.7rem", padding: "1px 6px" }}>
+                            <span className="badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe", fontSize: "0.68rem", padding: "1px 5px" }}>
                               4K UHD
                             </span>
                           )}
                           {rel.isH264 && (
-                            <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.7rem", padding: "1px 6px" }}>
-                              H.264 MP4
+                            <span className="badge" style={{ background: "rgba(34, 197, 94, 0.2)", color: "#4ade80", fontSize: "0.68rem", padding: "1px 5px" }}>
+                              H.264
                             </span>
                           )}
+                          {rel.subtitles?.badges && rel.subtitles.badges.map(b => (
+                            <span
+                              key={b.code}
+                              className="badge"
+                              style={{
+                                background: b.color === 'green' ? 'rgba(34, 197, 94, 0.2)' :
+                                            b.color === 'emerald' ? 'rgba(16, 185, 129, 0.2)' :
+                                            b.color === 'purple' ? 'rgba(168, 85, 247, 0.2)' :
+                                            b.color === 'indigo' ? 'rgba(99, 102, 241, 0.2)' :
+                                            b.color === 'blue' ? 'rgba(59, 130, 246, 0.2)' :
+                                            'rgba(255, 255, 255, 0.08)',
+                                color: b.color === 'green' ? '#4ade80' :
+                                       b.color === 'emerald' ? '#6ee7b7' :
+                                       b.color === 'purple' ? '#d8b4fe' :
+                                       b.color === 'indigo' ? '#a5b4fc' :
+                                       b.color === 'blue' ? '#93c5fd' :
+                                       'var(--text-dim)',
+                                fontSize: "0.68rem",
+                                padding: "1px 5px"
+                              }}
+                            >
+                              {b.label}
+                            </span>
+                          ))}
                           <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                            ({rel.size})
+                            ({rel.size}) • {rel.source}
                           </span>
                         </div>
                         <div style={{ fontSize: "0.72rem", color: "var(--text-dim)", maxWidth: "380px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={rel.name}>
@@ -1149,6 +1252,36 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                 </div>
               )}
 
+              {/* Subtitle Filter Selector for TV Shows */}
+              <div style={{ display: "flex", gap: "8px", marginBottom: "12px", alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Subtitle Language (字幕筛选):</span>
+                {([
+                  { key: 'all', label: '🌐 All (全部)' },
+                  { key: 'chs', label: '🇨🇳 简体中文' },
+                  { key: 'cht', label: '🇭🇰 繁体中文' },
+                  { key: 'eng', label: '🇺🇸 English (英文)' }
+                ] as const).map(f => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    onClick={() => applySubtitleFilter(f.key)}
+                    style={{
+                      padding: "3px 10px",
+                      fontSize: "0.75rem",
+                      borderRadius: "14px",
+                      border: "1px solid",
+                      borderColor: subtitleFilter === f.key ? "var(--primary)" : "var(--border-light)",
+                      background: subtitleFilter === f.key ? "rgba(99, 102, 241, 0.2)" : "transparent",
+                      color: subtitleFilter === f.key ? "var(--primary)" : "var(--text-muted)",
+                      cursor: "pointer",
+                      fontWeight: subtitleFilter === f.key ? 600 : 400
+                    }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
               <div style={{ marginBottom: "14px" }}>
                 <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-main)", marginBottom: "8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span>Episodes Preview ({tvEpisodes.length} Episodes)</span>
@@ -1212,6 +1345,30 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                                     🔥 x265
                                   </span>
                                 )}
+                                {ep.subtitles?.badges && ep.subtitles.badges.map(b => (
+                                  <span
+                                    key={b.code}
+                                    className="badge"
+                                    style={{
+                                      background: b.color === 'green' ? 'rgba(34, 197, 94, 0.2)' :
+                                                  b.color === 'emerald' ? 'rgba(16, 185, 129, 0.2)' :
+                                                  b.color === 'purple' ? 'rgba(168, 85, 247, 0.2)' :
+                                                  b.color === 'indigo' ? 'rgba(99, 102, 241, 0.2)' :
+                                                  b.color === 'blue' ? 'rgba(59, 130, 246, 0.2)' :
+                                                  'rgba(255, 255, 255, 0.08)',
+                                      color: b.color === 'green' ? '#4ade80' :
+                                             b.color === 'emerald' ? '#6ee7b7' :
+                                             b.color === 'purple' ? '#d8b4fe' :
+                                             b.color === 'indigo' ? '#a5b4fc' :
+                                             b.color === 'blue' ? '#93c5fd' :
+                                             'var(--text-dim)',
+                                      fontSize: "0.68rem",
+                                      padding: "1px 5px"
+                                    }}
+                                  >
+                                    {b.label}
+                                  </span>
+                                ))}
                                 {ep.sizeMb && ep.sizeMb !== '0' && (
                                   <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
                                     ({parseFloat(ep.sizeMb) > 1024 ? `${(parseFloat(ep.sizeMb)/1024).toFixed(1)} GB` : `${Math.round(parseFloat(ep.sizeMb))} MB`})
@@ -1266,11 +1423,35 @@ export const RssSubscribeModal: React.FC<RssSubscribeModalProps> = ({
                                   fontSize: "0.74rem"
                                 }}>
                                   <div style={{ flex: 1, minWidth: 0, paddingRight: "8px" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "1px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "4px", marginBottom: "1px", flexWrap: "wrap" }}>
                                       {alt.is1080p && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd" }}>1080p</span>}
                                       {alt.is720p && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(16, 185, 129, 0.2)", color: "#6ee7b7" }}>720p</span>}
                                       {alt.isH264 && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(34, 197, 94, 0.2)", color: "#4ade80" }}>⚡ H.264</span>}
                                       {alt.isHevc && <span className="badge" style={{ fontSize: "0.62rem", padding: "1px 4px", background: "rgba(168, 85, 247, 0.2)", color: "#d8b4fe" }}>🔥 x265</span>}
+                                      {alt.subtitles?.badges && alt.subtitles.badges.map(b => (
+                                        <span
+                                          key={b.code}
+                                          className="badge"
+                                          style={{
+                                            background: b.color === 'green' ? 'rgba(34, 197, 94, 0.2)' :
+                                                        b.color === 'emerald' ? 'rgba(16, 185, 129, 0.2)' :
+                                                        b.color === 'purple' ? 'rgba(168, 85, 247, 0.2)' :
+                                                        b.color === 'indigo' ? 'rgba(99, 102, 241, 0.2)' :
+                                                        b.color === 'blue' ? 'rgba(59, 130, 246, 0.2)' :
+                                                        'rgba(255, 255, 255, 0.08)',
+                                            color: b.color === 'green' ? '#4ade80' :
+                                                   b.color === 'emerald' ? '#6ee7b7' :
+                                                   b.color === 'purple' ? '#d8b4fe' :
+                                                   b.color === 'indigo' ? '#a5b4fc' :
+                                                   b.color === 'blue' ? '#93c5fd' :
+                                                   'var(--text-dim)',
+                                            fontSize: "0.62rem",
+                                            padding: "1px 4px"
+                                          }}
+                                        >
+                                          {b.label}
+                                        </span>
+                                      ))}
                                       <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>
                                         {alt.sizeMb && alt.sizeMb !== '0' ? `${alt.sizeMb} MB` : ''} • {alt.seeds || 0} seeds
                                       </span>
