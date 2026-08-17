@@ -7,10 +7,10 @@ export function parseSubtitleInfo(rawTitle) {
   const t = rawTitle || '';
   
   // 1. Simplified Chinese
-  const isChs = /简[体中日]|CHS|GB|GBK|ZH[-_]CN|ZH[-_]HANS|Chi_Sim|简体|内嵌简|内封简/i.test(t);
+  const isChs = /简[体中日繁]|CHS|GB|GBK|ZH[-_]CN|ZH[-_]HANS|Chi_Sim|简体|内嵌简|内封简|简繁/i.test(t);
   
   // 2. Traditional Chinese
-  const isCht = /繁[体中日]|CHT|BIG5|ZH[-_]TW|ZH[-_]HK|ZH[-_]HANT|Chi_Tra|繁体|内嵌繁|内封繁/i.test(t);
+  const isCht = /繁[体中日简]|CHT|BIG5|ZH[-_]TW|ZH[-_]HK|ZH[-_]HANT|Chi_Tra|繁体|内嵌繁|内封繁|简繁/i.test(t);
   
   // 3. Bilingual / Multi
   const isBilingual = /双语|中英|中日|简日|繁日|DualSub/i.test(t);
@@ -26,7 +26,9 @@ export function parseSubtitleInfo(rawTitle) {
   const isRaw = /\b(?:RAW|RAWS|NCED|NCOP)\b/i.test(t) && !isGenericChinese && !isEng;
 
   const badges = [];
-  if (isBilingual) {
+  if (isChs && isCht) {
+    badges.push({ code: 'chs_cht', label: '🇨🇳 简繁', color: 'green' });
+  } else if (isBilingual) {
     badges.push({ code: 'bilingual', label: '🌐 中英双语', color: 'emerald' });
   } else {
     if (isChs) badges.push({ code: 'chs', label: '🇨🇳 简中', color: 'green' });
@@ -36,7 +38,7 @@ export function parseSubtitleInfo(rawTitle) {
 
   if (isMulti) {
     badges.push({ code: 'multi', label: '🌐 多国字幕', color: 'indigo' });
-  } else if (isEng && !isBilingual) {
+  } else if (isEng && !isBilingual && !(isChs && isCht)) {
     badges.push({ code: 'eng', label: '🇺🇸 英文', color: 'blue' });
   }
 
@@ -60,12 +62,17 @@ export function parseSubtitleInfo(rawTitle) {
  */
 export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber = 1) {
   const allRawEpisodes = [];
+  const cleanImdb = imdbId && imdbId.startsWith('tt') ? imdbId : '';
   const normalizedTitle = (englishTitle || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
   const searchWords = normalizedTitle.split(/\s+/).filter(w => w.length > 1);
 
+  if (!cleanImdb && searchWords.length === 0) {
+    return { success: false, episodes: [], packages: [], count: 0, allReleasesByEpisode: {} };
+  }
+
   // 1. Try EZTV (by IMDb ID) with multi-page pagination (up to 4 pages for deep historical season support)
-  if (imdbId && imdbId.startsWith('tt')) {
-    const numericId = imdbId.replace('tt', '');
+  if (cleanImdb) {
+    const numericId = cleanImdb.replace('tt', '');
     
     for (let page = 1; page <= 4; page++) {
       const url = `https://eztv.re/api/get-torrents?imdb_id=${numericId}&limit=100&page=${page}`;
@@ -131,10 +138,10 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
 
   // 2. Multi-Source Fallback (APIBay): If EZTV has no/few episodes (e.g. classic finished shows like Breaking Bad)
   const uniqueEpNums = new Set(allRawEpisodes.map(e => e.episodeNum));
-  if (uniqueEpNums.size < 5 && englishTitle) {
+  if (uniqueEpNums.size < 5 && searchWords.length > 0) {
     console.log(`[Western TV Search]: Querying APIBay fallback for "${englishTitle}" Season ${seasonNumber}...`);
     try {
-      const qUrl = `https://apibay.org/q.php?q=${encodeURIComponent(englishTitle)}&cat=200`;
+      const qUrl = `https://apibay.org/q.php?q=${encodeURIComponent(searchWords.join(' '))}&cat=200`;
       const res = await fetch(qUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
       });
@@ -144,7 +151,7 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
         if (data && data.length > 0 && data[0].name !== 'No results returned') {
           for (const t of data) {
             const tNorm = t.name.toLowerCase().replace(/[^a-z0-9]/g, ' ');
-            const titleMatches = searchWords.every(w => tNorm.includes(w));
+            const titleMatches = searchWords.length > 0 && searchWords.every(w => tNorm.includes(w));
             if (!titleMatches) continue;
 
             // Direct Episode / Season Match: S02, S02E01, Season 2, S2E1, Season.02
@@ -186,6 +193,7 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
               is720p,
               isH264,
               isHevc,
+              subtitles: parseSubtitleInfo(t.name),
               downloadUrl: magnet,
               sizeMb: (parseInt(t.size, 10) / (1024 * 1024)).toFixed(1),
               seeds: parseInt(t.seeders, 10) || 0
@@ -373,10 +381,10 @@ export async function searchWesternTvTorrents(imdbId, englishTitle, seasonNumber
 }
 
 /**
- * Search Chinese / Asian Drama torrents via DMHY & ACG.RIP
+ * Search Chinese / Asian Anime & Drama torrents via Bangumi.moe & DMHY
  */
 export async function searchChineseAndAsianTvTorrents(title, originalName, seasonNumber = 1) {
-  const episodes = [];
+  const allRawEpisodes = [];
   const queryCandidates = [
     seasonNumber > 1 ? `${title} 第${seasonNumber}季` : title,
     seasonNumber > 1 ? `${title} S0${seasonNumber}` : title,
@@ -384,10 +392,74 @@ export async function searchChineseAndAsianTvTorrents(title, originalName, seaso
     originalName
   ].filter(Boolean);
 
+  // 1. Bangumi.moe API Search
+  for (const query of queryCandidates) {
+    try {
+      console.log(`[Asian TV Search]: Querying Bangumi.moe for "${query}"`);
+      const res = await fetch('https://bangumi.moe/api/v2/torrent/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.torrents) {
+          for (const t of data.torrents) {
+            const rawTitle = t.title;
+            const isPack = /合集|全集|Fin(?:al)?|S0?\d+[\s\-_]+(?:Complete|Pack)|(?:01|1)[\s\-_~～]+(\d{2,3})|Reseed|完结/i.test(rawTitle);
+
+            let epNum = null;
+            if (isPack) {
+              epNum = 'Season_Pack';
+            } else {
+              const cnMatch = rawTitle.match(/第\s*(\d{1,3})\s*[集話话]/i);
+              if (cnMatch) epNum = cnMatch[1].padStart(2, '0');
+              if (!epNum) {
+                const epMatch = rawTitle.match(/(?:EP|E)\s*(\d{1,3})\b/i);
+                if (epMatch) epNum = epMatch[1].padStart(2, '0');
+              }
+              if (!epNum) {
+                const bracketMatch = rawTitle.match(/\[(\d{1,3})\]/);
+                if (bracketMatch) epNum = bracketMatch[1].padStart(2, '0');
+              }
+            }
+
+            if (!epNum) epNum = 'Season_Pack';
+
+            const is4k = /2160p|4k/i.test(rawTitle);
+            const is1080p = /1080p|1920x1080/i.test(rawTitle) && !is4k;
+            const is720p = /720p/i.test(rawTitle);
+            const isHevc = /x265|hevc|h\.?265/i.test(rawTitle);
+            const isH264 = (/x264|h264|h\.264|avc/i.test(rawTitle) || (!isHevc && !is4k)) && !isHevc;
+            const magnet = t.magnet || `magnet:?xt=urn:btih:${t._id}&dn=${encodeURIComponent(rawTitle)}`;
+
+            allRawEpisodes.push({
+              rawTitle,
+              episodeNum: epNum,
+              cleanEpisodeName: epNum === 'Season_Pack' ? `Season ${seasonNumber} Complete Pack` : `Episode ${epNum}`,
+              seasonNumber,
+              is4k,
+              is1080p,
+              is720p,
+              isH264,
+              isHevc,
+              subtitles: parseSubtitleInfo(rawTitle),
+              downloadUrl: magnet,
+              sizeMb: t.size ? (t.size / (1024 * 1024)).toFixed(1) : '0',
+              seeds: t.seeders || 1
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[Asian TV Search]: Bangumi.moe error with query "${query}":`, err.message);
+    }
+  }
+
+  // 2. DMHY RSS Search
   for (const query of queryCandidates) {
     const url = `https://share.dmhy.org/topics/rss/rss.xml?keyword=${encodeURIComponent(query)}`;
-    console.log(`[Asian TV Search]: Querying DMHY for "${query}"`);
-
     try {
       const res = await fetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -402,86 +474,148 @@ export async function searchChineseAndAsianTvTorrents(title, originalName, seaso
           const rawTitle = m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
           const downloadUrl = m[2].trim();
 
-          // Episode number extraction
+          const isPack = /合集|全集|Fin(?:al)?|S0?\d+[\s\-_]+(?:Complete|Pack)|(?:01|1)[\s\-_~～]+(\d{2,3})|Reseed|完结/i.test(rawTitle);
           let epNum = null;
-          const cnMatch = rawTitle.match(/第\s*(\d{1,3})\s*[集話话]/i);
-          if (cnMatch) epNum = cnMatch[1].padStart(2, '0');
-
-          if (!epNum) {
-            const epMatch = rawTitle.match(/(?:EP|E)\s*(\d{1,3})\b/i);
-            if (epMatch) epNum = epMatch[1].padStart(2, '0');
-          }
-
-          if (!epNum) {
-            const bracketMatch = rawTitle.match(/\[(\d{1,3})\]/);
-            if (bracketMatch) epNum = bracketMatch[1].padStart(2, '0');
-          }
-
-          if (!epNum) {
+          if (isPack) {
             epNum = 'Season_Pack';
+          } else {
+            const cnMatch = rawTitle.match(/第\s*(\d{1,3})\s*[集話话]/i);
+            if (cnMatch) epNum = cnMatch[1].padStart(2, '0');
+            if (!epNum) {
+              const epMatch = rawTitle.match(/(?:EP|E)\s*(\d{1,3})\b/i);
+              if (epMatch) epNum = epMatch[1].padStart(2, '0');
+            }
+            if (!epNum) {
+              const bracketMatch = rawTitle.match(/\[(\d{1,3})\]/);
+              if (bracketMatch) epNum = bracketMatch[1].padStart(2, '0');
+            }
           }
 
-          episodes.push({
+          if (!epNum) epNum = 'Season_Pack';
+
+          const is4k = /2160p|4k/i.test(rawTitle);
+          const is1080p = /1080p|1920x1080/i.test(rawTitle) && !is4k;
+          const is720p = /720p/i.test(rawTitle);
+          const isHevc = /x265|hevc|h\.?265/i.test(rawTitle);
+          const isH264 = (/x264|h264|h\.264|avc/i.test(rawTitle) || (!isHevc && !is4k)) && !isHevc;
+
+          allRawEpisodes.push({
             rawTitle,
             episodeNum: epNum,
             cleanEpisodeName: epNum === 'Season_Pack' ? `Season ${seasonNumber} Complete Pack` : `Episode ${epNum}`,
             seasonNumber,
-            is1080p: /1080p|1920x1080/i.test(rawTitle),
-            is720p: /720p/i.test(rawTitle),
-            isH264: /h\.?264|avc/i.test(rawTitle),
-            isHevc: /h\.?265|hevc/i.test(rawTitle),
+            is4k,
+            is1080p,
+            is720p,
+            isH264,
+            isHevc,
+            subtitles: parseSubtitleInfo(rawTitle),
             downloadUrl,
             sizeMb: '0',
             seeds: 1
           });
         }
-
-        break; // Stop after first successful candidate match
       }
     } catch (err) {
-      console.warn(`[Asian TV Search]: Error with query "${query}":`, err.message);
+      console.warn(`[Asian TV Search]: DMHY error with query "${query}":`, err.message);
     }
   }
 
-  // Deduplicate by episode number
-  const grouped = new Map();
-  for (const ep of episodes) {
-    if (!grouped.has(ep.episodeNum)) grouped.set(ep.episodeNum, []);
-    grouped.get(ep.episodeNum).push(ep);
+  // 3. Organize all releases by episode number
+  const allReleasesByEpisode = {};
+  for (const ep of allRawEpisodes) {
+    if (!allReleasesByEpisode[ep.episodeNum]) {
+      allReleasesByEpisode[ep.episodeNum] = [];
+    }
+    if (!allReleasesByEpisode[ep.episodeNum].some(existing => existing.downloadUrl === ep.downloadUrl)) {
+      allReleasesByEpisode[ep.episodeNum].push(ep);
+    }
   }
 
-  const selected = [];
-  for (const list of grouped.values()) {
-    list.sort((a, b) => {
-      if (a.is1080p !== b.is1080p) return a.is1080p ? -1 : 1;
-      if (a.isH264 !== b.isH264) return a.isH264 ? -1 : 1;
-      return 0;
+  // Sort inside each episode: Prefer Chinese sub > 1080p > H264
+  for (const epNum of Object.keys(allReleasesByEpisode)) {
+    allReleasesByEpisode[epNum].sort((a, b) => {
+      let scoreA = 0;
+      let scoreB = 0;
+      if (a.subtitles?.isChs || a.subtitles?.isCht) scoreA += 50;
+      if (b.subtitles?.isChs || b.subtitles?.isCht) scoreB += 50;
+      if (a.is1080p) scoreA += 30;
+      if (b.is1080p) scoreB += 30;
+      if (a.isH264) scoreA += 20;
+      if (b.isH264) scoreB += 20;
+      return scoreB - scoreA;
     });
-    selected.push(list[0]);
   }
 
-  selected.sort((a, b) => {
-    if (a.episodeNum === 'Season_Pack') return -1;
-    if (b.episodeNum === 'Season_Pack') return 1;
-    return a.episodeNum.localeCompare(b.episodeNum, undefined, { numeric: true });
-  });
+  // Build packages
+  const packages = [];
+  const seasonPacks = allRawEpisodes.filter(e => e.episodeNum === 'Season_Pack');
+  if (seasonPacks.length > 0) {
+    packages.push({
+      id: 'season_packs',
+      name: '📦 Season Complete Pack',
+      description: '全季完整合集包 (一键下载整季，推荐使用)',
+      badge: 'SEASON PACK',
+      badgeColor: 'amber',
+      episodeCount: seasonPacks.length,
+      totalSizeMb: seasonPacks.reduce((acc, cur) => acc + parseFloat(cur.sizeMb || '0'), 0),
+      episodes: seasonPacks
+    });
+  }
 
-  return { success: true, count: selected.length, episodes: selected };
+  const individualEps = Object.entries(allReleasesByEpisode)
+    .filter(([epNum]) => epNum !== 'Season_Pack')
+    .map(([_, list]) => list[0])
+    .sort((a, b) => a.episodeNum.localeCompare(b.episodeNum, undefined, { numeric: true }));
+
+  if (individualEps.length > 0) {
+    packages.unshift({
+      id: '1080p_all',
+      name: '⚡ 1080p Direct-Play Package',
+      description: '高清内嵌/内封中文字幕方案',
+      badge: '1080p HD',
+      badgeColor: 'green',
+      episodeCount: individualEps.length,
+      totalSizeMb: individualEps.reduce((acc, cur) => acc + parseFloat(cur.sizeMb || '0'), 0),
+      episodes: individualEps
+    });
+  }
+
+  const defaultEpisodes = packages.length > 0 ? packages[0].episodes : Object.values(allReleasesByEpisode).map(list => list[0]);
+
+  return {
+    success: allRawEpisodes.length > 0,
+    count: defaultEpisodes.length,
+    episodes: defaultEpisodes,
+    packages,
+    defaultPackageId: packages.length > 0 ? packages[0].id : 'default',
+    allReleasesByEpisode
+  };
 }
 
 /**
  * Universal Dispatcher: Search torrents for any TMDB show
  */
 export async function searchUniversalMediaTorrents({ imdbId, showName, originalName, seasonNumber = 1, showType, country = [] }) {
-  const isWestern = showType === 'Western' || country.includes('US') || country.includes('GB') || country.includes('CA');
+  const isAsian = showType === 'Anime' || showType === 'Japanese' || showType === 'Chinese' || showType === 'Korean' || country.some(c => ['JP', 'CN', 'KR', 'TW', 'HK'].includes(c));
   
-  if (isWestern || (imdbId && imdbId.startsWith('tt'))) {
-    const westernRes = await searchWesternTvTorrents(imdbId, originalName || showName, seasonNumber);
-    if (westernRes.success && westernRes.episodes.length > 0) {
-      return westernRes;
+  if (isAsian) {
+    const asianRes = await searchChineseAndAsianTvTorrents(showName, originalName, seasonNumber);
+    if (asianRes.success && asianRes.episodes.length > 0) {
+      return asianRes;
     }
   }
 
-  // Fallback to Asian / Chinese search
-  return await searchChineseAndAsianTvTorrents(showName, originalName, seasonNumber);
+  // Western search
+  const westernRes = await searchWesternTvTorrents(imdbId, originalName || showName, seasonNumber);
+  if (westernRes.success && westernRes.episodes.length > 0) {
+    return westernRes;
+  }
+
+  // Fallback to Asian search if Western failed
+  if (!isAsian) {
+    return await searchChineseAndAsianTvTorrents(showName, originalName, seasonNumber);
+  }
+
+  return westernRes;
 }
