@@ -1011,9 +1011,7 @@ app.get('/api/transcode/:episodeId', (req, res) => {
       ffmpegArgs.push(
         '-c:v', 'copy',
         '-tag:v', 'hvc1',
-        '-c:a', 'aac',
-        '-ac', '2',
-        '-b:a', '192k'
+        '-c:a', 'copy'
       );
     }
 
