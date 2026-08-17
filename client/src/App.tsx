@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
   Tv, Settings as SettingsIcon, Play, Pause, AlertCircle, 
   Search, ArrowLeft, CheckCircle2, CircleDot, RefreshCw,
-  ArrowUp, Sparkles, Film, SkipForward, Trash2
+  ArrowUp, Sparkles, Film, SkipForward, Trash2, Info
 } from 'lucide-react';
 import { VideoPlayer } from './components/VideoPlayer';
 import { SettingsModal } from './components/SettingsModal';
@@ -515,17 +515,26 @@ export default function App() {
               </div>
 
               {/* Custom player component */}
-              <VideoPlayer
-                episodeId={selectedEpisode.id}
-                videoUrl={isTranscoding ? `/api/transcode/${selectedEpisode.id}` : `/api/stream/${selectedEpisode.id}`}
-                subtitleUrl={selectedEpisode.hasSubtitle ? `/api/subtitles/${selectedEpisode.id}` : null}
-                title={selectedEpisode.name}
-                onNextEpisode={handleNextEpisode}
-                hasNextEpisode={
-                  selectedShow.episodes.findIndex(ep => ep.id === selectedEpisode.id) < selectedShow.episodes.length - 1
-                }
-                durationMetadata={selectedEpisode.duration}
-              />
+              {(() => {
+                const isNonMp4 = selectedEpisode.fileName.toLowerCase().match(/\.(mkv|avi|mov|wmv|flv|ts|webm)$/i);
+                const effectiveVideoUrl = (isNonMp4 || isTranscoding)
+                  ? `/api/transcode/${selectedEpisode.id}`
+                  : `/api/stream/${selectedEpisode.id}`;
+
+                return (
+                  <VideoPlayer
+                    episodeId={selectedEpisode.id}
+                    videoUrl={effectiveVideoUrl}
+                    subtitleUrl={selectedEpisode.hasSubtitle ? `/api/subtitles/${selectedEpisode.id}` : null}
+                    title={selectedEpisode.name}
+                    onNextEpisode={handleNextEpisode}
+                    hasNextEpisode={
+                      selectedShow.episodes.findIndex(ep => ep.id === selectedEpisode.id) < selectedShow.episodes.length - 1
+                    }
+                    durationMetadata={selectedEpisode.duration}
+                  />
+                );
+              })()}
 
               <div style={{ marginTop: '16px' }}>
                 <h1 style={{ fontSize: '1.6rem', marginBottom: '8px' }}>{selectedEpisode.name}</h1>
@@ -534,7 +543,7 @@ export default function App() {
                 </p>
               </div>
 
-              {/* External Player Options & Format warnings */}
+              {/* External Player Options & Format Guide */}
               <div style={{ 
                 marginTop: '24px', 
                 padding: '20px', 
@@ -548,28 +557,29 @@ export default function App() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
                   <div>
                     <h3 style={{ fontSize: '1.05rem', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      External Player Options
+                      ⚡ Playback Engine & Native Streaming
                     </h3>
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
-                      Stream this episode in external players like VLC or IINA for full format support (HEVC, FLAC, Advanced Subtitles).
+                      Web player uses <strong>Direct Remux (0% CPU, 无损秒开)</strong> by default. You can also stream directly in external players for full ASS/HDR support.
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: '12px' }}>
                     <a 
                       href={`vlc://${window.location.origin}/api/stream/${selectedEpisode.id}`}
                       className="btn btn-primary"
-                      style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                      style={{ fontSize: '0.82rem', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
                     >
                       <Play size={14} fill="currentColor" />
                       Play in VLC
                     </a>
                     <button 
-                      className="btn"
+                      className="btn btn-secondary"
                       onClick={() => {
-                        const url = `${window.location.origin}/api/stream/${selectedEpisode.id}`;
-                        navigator.clipboard.writeText(url);
-                        showToast('Stream link copied to clipboard!');
+                        const streamUrl = `${window.location.origin}/api/stream/${selectedEpisode.id}`;
+                        navigator.clipboard.writeText(streamUrl);
+                        alert(`Stream link copied to clipboard:\n${streamUrl}\n\nYou can paste this into IINA, Infuse, PotPlayer, or VLC!`);
                       }}
+                      style={{ fontSize: '0.82rem', padding: '6px 14px' }}
                     >
                       Copy Stream Link
                     </button>
@@ -579,38 +589,25 @@ export default function App() {
                 <div style={{ 
                   display: 'flex', 
                   justifyContent: 'space-between', 
-                  alignItems: 'center', 
-                  padding: '12px 16px', 
-                  background: 'rgba(99, 102, 241, 0.05)', 
-                  border: '1px solid rgba(99, 102, 241, 0.15)',
+                  alignItems: 'center',
+                  padding: '12px 16px',
+                  background: 'var(--surface-hover)',
                   borderRadius: 'var(--radius-sm)',
-                  gap: '16px'
+                  border: '1px solid var(--border-light)'
                 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                     <div style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <CircleDot size={14} style={{ color: 'var(--primary)' }} />
-                      Server-Side Transcoding
+                      Direct Remux Streaming Engine
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {settings?.ffmpegAvailable 
-                        ? 'Convert video on-the-fly to H.264 / AAC for direct playback in your browser.'
-                        : 'Transcoding is unavailable because FFmpeg is not installed on the server.'}
+                      Packaging MKV/H.265 on-the-fly to MP4 stream with zero server CPU re-encoding load.
                     </div>
                   </div>
                   <div>
-                    {settings?.ffmpegAvailable ? (
-                      <button 
-                        className={`btn ${isTranscoding ? 'btn-primary' : ''}`}
-                        onClick={() => setIsTranscoding(prev => !prev)}
-                        style={{ fontSize: '0.8rem', padding: '6px 12px' }}
-                      >
-                        {isTranscoding ? 'ON (Transcoding)' : 'OFF (Direct Play)'}
-                      </button>
-                    ) : (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 'bold' }}>
-                        FFmpeg Missing
-                      </span>
-                    )}
+                    <span className="badge" style={{ background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', fontSize: '0.78rem', padding: '4px 10px' }}>
+                      ⚡ Direct Remux Active
+                    </span>
                   </div>
                 </div>
 
@@ -619,17 +616,15 @@ export default function App() {
                     display: 'flex', 
                     gap: '12px', 
                     padding: '12px 16px', 
-                    background: 'rgba(239, 68, 68, 0.05)', 
-                    border: '1px solid rgba(239, 68, 68, 0.15)',
+                    background: 'rgba(99, 102, 241, 0.05)', 
+                    border: '1px solid rgba(99, 102, 241, 0.2)',
                     borderRadius: 'var(--radius-sm)',
                     fontSize: '0.82rem',
-                    color: 'var(--text-muted)',
-                    alignItems: 'flex-start'
+                    color: 'var(--text-muted)'
                   }}>
-                    <AlertCircle size={18} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '2px' }} />
+                    <Info size={18} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '2px' }} />
                     <div>
-                      <strong style={{ color: 'var(--text-main)' }}>Format Notice:</strong> This video is an <code style={{ color: 'var(--primary)' }}>{selectedEpisode.fileName.split('.').pop()?.toUpperCase()}</code> file.
-                      Web browsers might fail to decode HEVC/H.265 video or FLAC audio streams natively. If the video fails to load, has no audio, or stutters, please click <strong>Play in VLC</strong> or use your preferred media player.
+                      <strong style={{ color: 'var(--text-main)' }}>Playback Info:</strong> This is a <code style={{ color: 'var(--primary)' }}>.{selectedEpisode.fileName.split('.').pop()?.toUpperCase()}</code> file. If your browser screen stays black or shows no audio, switch to <strong>⚙️ 兼容转码 (Full Transcode)</strong> in the player's ⚙️ settings, or open in <strong>IINA / VLC / Infuse</strong>.
                     </div>
                   </div>
                 )}

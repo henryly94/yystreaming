@@ -153,10 +153,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Helper to build active transcode/stream URL
   const buildTranscodeUrl = (baseUrl: string, startOffset: number, mode: 'remux' | 'full') => {
-    const isTranscoding = baseUrl.includes('/transcode/');
-    if (!isTranscoding) return baseUrl;
-    const separator = baseUrl.includes('?') ? '&' : '?';
-    let url = `${baseUrl}${separator}mode=${mode}`;
+    const targetUrl = baseUrl.includes('/transcode/') ? baseUrl : baseUrl.replace('/api/stream/', '/api/transcode/');
+    const separator = targetUrl.includes('?') ? '&' : '?';
+    let url = `${targetUrl}${separator}mode=${mode}`;
     if (startOffset > 2) {
       url += `&start=${startOffset}`;
     }
@@ -764,40 +763,38 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </div>
 
-                  {/* Stream Engine Mode (For Non-Native/H.265 Transcode) */}
-                  {videoUrl.includes('/transcode/') && (
-                    <div className="subtitle-setting-item">
-                      <div className="subtitle-setting-label">Playback Engine (播放引擎)</div>
-                      <div className="subtitle-select-grid">
-                        <button
-                          type="button"
-                          className={`subtitle-select-btn ${streamMode === 'remux' ? 'active' : ''}`}
-                          onClick={() => {
-                            setStreamMode('remux');
-                            setStreamNotice('⚡ Switched to Direct Remux (0% CPU, 100% Quality)');
-                            setTimeout(() => setStreamNotice(null), 3000);
-                          }}
-                          style={{ fontSize: '0.72rem' }}
-                          title="Direct Remux: 0% CPU, instant start, lossy-free pixel copy"
-                        >
-                          ⚡ 极速直推 (Remux)
-                        </button>
-                        <button
-                          type="button"
-                          className={`subtitle-select-btn ${streamMode === 'full' ? 'active' : ''}`}
-                          onClick={() => {
-                            setStreamMode('full');
-                            setStreamNotice('⚙️ Switched to Full Transcode (H.264 Compatibility Mode)');
-                            setTimeout(() => setStreamNotice(null), 3000);
-                          }}
-                          style={{ fontSize: '0.72rem' }}
-                          title="Full Transcode: Re-encode to H.264 for maximum browser compatibility"
-                        >
-                          ⚙️ 兼容转码 (Full)
-                        </button>
-                      </div>
+                  {/* Stream Engine Mode */}
+                  <div className="subtitle-setting-item">
+                    <div className="subtitle-setting-label">Playback Engine (播放引擎)</div>
+                    <div className="subtitle-select-grid">
+                      <button
+                        type="button"
+                        className={`subtitle-select-btn ${streamMode === 'remux' ? 'active' : ''}`}
+                        onClick={() => {
+                          setStreamMode('remux');
+                          setStreamNotice('⚡ Switched to Direct Remux (0% CPU, 100% Quality)');
+                          setTimeout(() => setStreamNotice(null), 3000);
+                        }}
+                        style={{ fontSize: '0.72rem' }}
+                        title="Direct Remux: 0% CPU, instant start, lossy-free pixel copy"
+                      >
+                        ⚡ 极速直推 (Remux)
+                      </button>
+                      <button
+                        type="button"
+                        className={`subtitle-select-btn ${streamMode === 'full' ? 'active' : ''}`}
+                        onClick={() => {
+                          setStreamMode('full');
+                          setStreamNotice('⚙️ Switched to Full Transcode (H.264 Compatibility Mode)');
+                          setTimeout(() => setStreamNotice(null), 3000);
+                        }}
+                        style={{ fontSize: '0.72rem' }}
+                        title="Full Transcode: Re-encode to H.264 for maximum browser compatibility"
+                      >
+                        ⚙️ 兼容转码 (Full)
+                      </button>
                     </div>
-                  )}
+                  </div>
 
                   {/* Re-transcode Option */}
                   {onRetranscode && (
