@@ -148,14 +148,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   // Load progress on mount or episode change
   // Stream Mode state for transcoding: 'remux' (Fast copy, 0 CPU) vs 'full' (Full re-encoding)
-  const [streamMode, setStreamMode] = useState<'remux' | 'full'>('remux');
+  const [streamMode, setStreamMode] = useState<'remux' | 'full'>('full');
   const [streamNotice, setStreamNotice] = useState<string | null>(null);
 
   // Helper to build active transcode/stream URL
   const buildTranscodeUrl = (baseUrl: string, startOffset: number, mode: 'remux' | 'full') => {
-    const targetUrl = baseUrl.includes('/transcode/') ? baseUrl : baseUrl.replace('/api/stream/', '/api/transcode/');
-    const separator = targetUrl.includes('?') ? '&' : '?';
-    let url = `${targetUrl}${separator}mode=${mode}`;
+    if (!baseUrl.includes('/transcode/')) {
+      return baseUrl; // Never alter direct MP4 streams!
+    }
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    let url = `${baseUrl}${separator}mode=${mode}`;
     if (startOffset > 2) {
       url += `&start=${startOffset}`;
     }
@@ -190,12 +192,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
 
-    if (isTranscoding && startOffset > 2) {
-      setStreamStartTime(startOffset);
-      setActiveVideoUrl(buildTranscodeUrl(videoUrl, startOffset, streamMode));
+    if (isTranscoding) {
+      if (startOffset > 2) {
+        setStreamStartTime(startOffset);
+        setActiveVideoUrl(buildTranscodeUrl(videoUrl, startOffset, streamMode));
+      } else {
+        setStreamStartTime(0);
+        setActiveVideoUrl(buildTranscodeUrl(videoUrl, 0, streamMode));
+      }
     } else {
       setStreamStartTime(0);
-      setActiveVideoUrl(buildTranscodeUrl(videoUrl, 0, streamMode));
+      setActiveVideoUrl(videoUrl);
     }
 
     const handleLoadedMetadata = () => {
