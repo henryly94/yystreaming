@@ -595,27 +595,108 @@ export async function searchChineseAndAsianTvTorrents(title, originalName, seaso
 
 /**
  * Universal Dispatcher: Search torrents for any TMDB show
+ * Aggregates Western indexers (EZTV + APIBay) and Chinese fan-sub indexers (DMHY + Bangumi.moe) in parallel
  */
 export async function searchUniversalMediaTorrents({ imdbId, showName, originalName, seasonNumber = 1, showType, country = [] }) {
   const isAsian = showType === 'Anime' || showType === 'Japanese' || showType === 'Chinese' || showType === 'Korean' || country.some(c => ['JP', 'CN', 'KR', 'TW', 'HK'].includes(c));
-  
+
+  // Run Western search and Chinese/Asian fan-sub search concurrently
+  const [westernRes, asianRes] = await Promise.allSettled([
+    searchWesternTvTorrents(imdbId, originalName || showName, seasonNumber),
+    searchChineseAndAsianTvTorrents(showName, originalName, seasonNumber)
+  ]);
+
+  const westernData = westernRes.status === 'fulfilled' ? westernRes.value : null;
+  const asianData = asianRes.status === 'fulfilled' ? asianRes.value : null;
+
+  // If this is an Asian show / Anime, prioritize Asian releases
   if (isAsian) {
-    const asianRes = await searchChineseAndAsianTvTorrents(showName, originalName, seasonNumber);
-    if (asianRes.success && asianRes.episodes.length > 0) {
-      return asianRes;
+    if (asianData && asianData.success && asianData.episodes.length > 0) {
+      return asianData;
+    }
+    if (westernData && westernData.success && westernData.episodes.length > 0) {
+      return westernData;
     }
   }
 
-  // Western search
-  const westernRes = await searchWesternTvTorrents(imdbId, originalName || showName, seasonNumber);
-  if (westernRes.success && westernRes.episodes.length > 0) {
-    return westernRes;
+  // For Western shows: Merge Western releases and Chinese fan-subbed releases
+  const allReleasesByEpisode = {};
+
+  // 1. Add Asian/Chinese fan-sub candidate releases
+  if (asianData && asianData.allReleasesByEpisode) {
+    for (const [epNum, list] of Object.entries(asianData.allReleasesByEpisode)) {
+      if (!allReleasesByEpisode[epNum]) allReleasesByEpisode[epNum] = [];
+      allReleasesByEpisode[epNum].push(...list);
+    }
   }
 
-  // Fallback to Asian search if Western failed
-  if (!isAsian) {
-    return await searchChineseAndAsianTvTorrents(showName, originalName, seasonNumber);
+  // 2. Add Western candidate releases
+  if (westernData && westernData.allReleasesByEpisode) {
+    for (const [epNum, list] of Object.entries(westernData.allReleasesByEpisode)) {
+      if (!allReleasesByEpisode[epNum]) allReleasesByEpisode[epNum] = [];
+      for (const rel of list) {
+        if (!allReleasesByEpisode[epNum].some(existing => existing.downloadUrl === rel.downloadUrl)) {
+          // If no subtitles attached, mark as English
+          if (!rel.subtitles || rel.subtitles.badges.length === 0) {
+            rel.subtitles = {
+              isChs: false,
+              isCht: false,
+              isEng: true,
+              isBilingual: false,
+              isMulti: false,
+              isRaw: false,
+              badges: [{ code: 'eng', label: '🇺🇸 英文', color: 'blue' }]
+            };
+          }
+          allReleasesByEpisode[epNum].push(rel);
+        }
+      }
+    }
   }
 
-  return westernRes;
+  // Sort candidates inside each episode: Prefer Chinese Sub > 1080p > H.264 > Seeds
+  for (const epNum of Object.keys(allReleasesByEpisode)) {
+    allReleasesByEpisode[epNum].sort((a, b) => {
+      let scoreA = 0;
+      let scoreB = 0;
+      if (a.subtitles?.isChs || a.subtitles?.isCht || a.subtitles?.isBilingual) scoreA += 100;
+      if (b.subtitles?.isChs || b.subtitles?.isCht || b.subtitles?.isBilingual) scoreB += 100;
+      if (a.is1080p) scoreA += 30;
+      if (b.is1080p) scoreB += 30;
+      if (a.isH264) scoreA += 20;
+      if (b.isH264) scoreB += 20;
+      return scoreB - scoreA;
+    });
+  }
+
+  // Build combined packages
+  const packages = [];
+  if (westernData && westernData.packages) {
+    packages.push(...westernData.packages);
+  }
+  if (asianData && asianData.packages) {
+    for (const pkg of asianData.packages) {
+      if (!packages.some(p => p.id === pkg.id)) {
+        packages.unshift(pkg);
+      }
+    }
+  }
+
+  const allEps = Object.values(allReleasesByEpisode).map(list => list[0]);
+
+  if (allEps.length === 0 && westernData?.episodes?.length) {
+    return westernData;
+  }
+  if (allEps.length === 0 && asianData?.episodes?.length) {
+    return asianData;
+  }
+
+  return {
+    success: allEps.length > 0,
+    count: allEps.length,
+    episodes: packages.length > 0 ? packages[0].episodes : allEps,
+    packages,
+    defaultPackageId: packages.length > 0 ? packages[0].id : 'default',
+    allReleasesByEpisode
+  };
 }
