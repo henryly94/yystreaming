@@ -981,21 +981,38 @@ app.get('/api/transcode/:episodeId', (req, res) => {
     res.writeHead(responseStatus, responseHeaders);
 
     const ffmpegArgs = [];
+    const mode = (req.query.mode || 'remux').toLowerCase();
     
     // Fast time-based seeking on input side (performs keyframe seek before input file reads)
     if (startTime > 0) {
       ffmpegArgs.push('-ss', startTime.toString());
     }
 
+    ffmpegArgs.push('-i', safeVideoPath);
+
+    if (mode === 'full') {
+      // Full re-encoding for legacy / incompatible client browsers
+      ffmpegArgs.push(
+        '-vf', "scale='min(1920,iw)':-2,format=yuv420p",
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '128k'
+      );
+    } else {
+      // Direct Remux (Stream Copy): 0% CPU, 0 latency, lossy-free pixel copy!
+      ffmpegArgs.push(
+        '-c:v', 'copy',
+        '-tag:v', 'hvc1',
+        '-c:a', 'aac',
+        '-ac', '2',
+        '-b:a', '192k'
+      );
+    }
+
     ffmpegArgs.push(
-      '-i', safeVideoPath,
-      '-vf', "scale='min(1920,iw)':-2,format=yuv420p", // Scales 4K down to 1080p for performance & resolves H.264 profile resolution limits
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',   // Crucial for real-time streaming to avoid CPU lag
-      '-tune', 'zerolatency',
-      '-c:a', 'aac',
-      '-ac', '2',               // Downmix to stereo
-      '-b:a', '128k',
       '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
       'pipe:1'

@@ -147,6 +147,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   // Load progress on mount or episode change
+  // Stream Mode state for transcoding: 'remux' (Fast copy, 0 CPU) vs 'full' (Full re-encoding)
+  const [streamMode, setStreamMode] = useState<'remux' | 'full'>('remux');
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
+
+  // Helper to build active transcode/stream URL
+  const buildTranscodeUrl = (baseUrl: string, startOffset: number, mode: 'remux' | 'full') => {
+    const isTranscoding = baseUrl.includes('/transcode/');
+    if (!isTranscoding) return baseUrl;
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    let url = `${baseUrl}${separator}mode=${mode}`;
+    if (startOffset > 2) {
+      url += `&start=${startOffset}`;
+    }
+    return url;
+  };
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -177,11 +193,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     if (isTranscoding && startOffset > 2) {
       setStreamStartTime(startOffset);
-      const separator = videoUrl.includes('?') ? '&' : '?';
-      setActiveVideoUrl(`${videoUrl}${separator}start=${startOffset}`);
+      setActiveVideoUrl(buildTranscodeUrl(videoUrl, startOffset, streamMode));
     } else {
       setStreamStartTime(0);
-      setActiveVideoUrl(videoUrl);
+      setActiveVideoUrl(buildTranscodeUrl(videoUrl, 0, streamMode));
     }
 
     const handleLoadedMetadata = () => {
@@ -194,11 +209,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     };
 
+    const handleError = () => {
+      if (isTranscoding && streamMode === 'remux') {
+        console.warn('[VideoPlayer]: Remux stream playback failed. Auto-fallback to Full Transcode compatibility mode.');
+        setStreamNotice('⚠️ Browser cannot decode H.265 directly. Switched to Full Transcode mode.');
+        setTimeout(() => setStreamNotice(null), 5000);
+        setStreamMode('full');
+      }
+    };
+
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('error', handleError);
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('error', handleError);
     };
-  }, [episodeId, videoUrl, durationMetadata]);
+  }, [episodeId, videoUrl, durationMetadata, streamMode]);
 
   // Sync activeVideoUrl changes (reloads transcode stream on seek)
   useEffect(() => {
@@ -298,8 +324,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const isTranscoding = videoUrl.includes('/transcode/');
     if (isTranscoding) {
       setStreamStartTime(newTime);
-      const separator = videoUrl.includes('?') ? '&' : '?';
-      setActiveVideoUrl(`${videoUrl}${separator}start=${newTime}`);
+      setActiveVideoUrl(buildTranscodeUrl(videoUrl, newTime, streamMode));
     } else {
       video.currentTime = newTime;
     }
@@ -502,8 +527,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const isTranscoding = videoUrl.includes('/transcode/');
     if (isTranscoding) {
       setStreamStartTime(newTime);
-      const separator = videoUrl.includes('?') ? '&' : '?';
-      setActiveVideoUrl(`${videoUrl}${separator}start=${newTime}`);
+      setActiveVideoUrl(buildTranscodeUrl(videoUrl, newTime, streamMode));
     } else {
       video.currentTime = newTime;
       setProgress(percentage * 100);
@@ -582,6 +606,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           />
         )}
       </video>
+
+      {/* Stream Notice Toast */}
+      {streamNotice && (
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(15, 23, 42, 0.88)',
+          border: '1px solid rgba(99, 102, 241, 0.4)',
+          color: '#e2e8f0',
+          padding: '8px 16px',
+          borderRadius: '20px',
+          fontSize: '0.82rem',
+          zIndex: 100,
+          pointerEvents: 'none',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(8px)',
+          fontWeight: 500
+        }}>
+          {streamNotice}
+        </div>
+      )}
 
       {/* Middle Big Click Playback Indicator */}
       <div className={`mid-play-indicator ${showMiddleIndicator ? 'trigger' : ''}`}>
@@ -716,6 +763,41 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {/* Stream Engine Mode (For Non-Native/H.265 Transcode) */}
+                  {videoUrl.includes('/transcode/') && (
+                    <div className="subtitle-setting-item">
+                      <div className="subtitle-setting-label">Playback Engine (播放引擎)</div>
+                      <div className="subtitle-select-grid">
+                        <button
+                          type="button"
+                          className={`subtitle-select-btn ${streamMode === 'remux' ? 'active' : ''}`}
+                          onClick={() => {
+                            setStreamMode('remux');
+                            setStreamNotice('⚡ Switched to Direct Remux (0% CPU, 100% Quality)');
+                            setTimeout(() => setStreamNotice(null), 3000);
+                          }}
+                          style={{ fontSize: '0.72rem' }}
+                          title="Direct Remux: 0% CPU, instant start, lossy-free pixel copy"
+                        >
+                          ⚡ 极速直推 (Remux)
+                        </button>
+                        <button
+                          type="button"
+                          className={`subtitle-select-btn ${streamMode === 'full' ? 'active' : ''}`}
+                          onClick={() => {
+                            setStreamMode('full');
+                            setStreamNotice('⚙️ Switched to Full Transcode (H.264 Compatibility Mode)');
+                            setTimeout(() => setStreamNotice(null), 3000);
+                          }}
+                          style={{ fontSize: '0.72rem' }}
+                          title="Full Transcode: Re-encode to H.264 for maximum browser compatibility"
+                        >
+                          ⚙️ 兼容转码 (Full)
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Re-transcode Option */}
                   {onRetranscode && (
