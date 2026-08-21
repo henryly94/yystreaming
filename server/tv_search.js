@@ -621,7 +621,7 @@ export async function searchChineseAndAsianTvTorrents(title, originalName, seaso
       badge: 'SEASON PACK',
       badgeColor: 'amber',
       episodeCount: seasonPacks.length,
-      totalSizeMb: seasonPacks.reduce((acc, cur) => acc + parseFloat(cur.sizeMb || '0'), 0),
+      totalSizeMb: seasonPacks.reduce((acc, cur) => acc + (parseFloat(cur.sizeMb) || 0), 0),
       episodes: seasonPacks
     });
   }
@@ -639,7 +639,7 @@ export async function searchChineseAndAsianTvTorrents(title, originalName, seaso
       badge: '1080p HD',
       badgeColor: 'green',
       episodeCount: individualEps.length,
-      totalSizeMb: individualEps.reduce((acc, cur) => acc + parseFloat(cur.sizeMb || '0'), 0),
+      totalSizeMb: individualEps.reduce((acc, cur) => acc + (parseFloat(cur.sizeMb) || 0), 0),
       episodes: individualEps
     });
   }
