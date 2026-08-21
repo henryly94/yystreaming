@@ -36,9 +36,10 @@ export async function searchTmdb(query, apiKey = DEFAULT_TMDB_API_KEY) {
         const releaseDate = isTv ? item.first_air_date : item.release_date;
         const country = item.origin_country || [];
 
-        // Determine friendly show type label
-        let showType = isTv ? 'TV' : 'Movie';
-        if (isTv) {
+        // Determine friendly show type label (Animation from JP or genre 16 is Anime)
+        const isAnime = item.genre_ids?.includes(16) || (isTv && country.includes('JP'));
+        let showType = isTv ? (isAnime ? 'Anime' : 'TV') : 'Movie';
+        if (isTv && !isAnime) {
           if (country.includes('CN') || country.includes('TW') || country.includes('HK')) {
             showType = 'Chinese';
           } else if (country.includes('KR')) {
@@ -97,15 +98,18 @@ export async function getTmdbShowDetails(tmdbId, apiKey = DEFAULT_TMDB_API_KEY) 
     const imdbId = data.external_ids?.imdb_id || null;
     const country = data.origin_country || [];
 
-    let showType = 'TV';
-    if (country.includes('CN') || country.includes('TW') || country.includes('HK')) {
-      showType = 'Chinese';
-    } else if (country.includes('KR')) {
-      showType = 'Korean';
-    } else if (country.includes('JP')) {
-      showType = 'Japanese';
-    } else if (country.includes('US') || country.includes('GB') || country.includes('CA') || country.includes('AU')) {
-      showType = 'Western';
+    const isAnime = (data.genres && data.genres.some(g => g.id === 16 || /动画|Animation|Anime/i.test(g.name))) || country.includes('JP');
+    let showType = isAnime ? 'Anime' : 'TV';
+    if (!isAnime) {
+      if (country.includes('CN') || country.includes('TW') || country.includes('HK')) {
+        showType = 'Chinese';
+      } else if (country.includes('KR')) {
+        showType = 'Korean';
+      } else if (country.includes('JP')) {
+        showType = 'Japanese';
+      } else if (country.includes('US') || country.includes('GB') || country.includes('CA') || country.includes('AU')) {
+        showType = 'Western';
+      }
     }
 
     const seasons = (data.seasons || [])

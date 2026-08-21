@@ -1259,26 +1259,29 @@ app.get('/api/media/search', async (req, res) => {
       });
     }
 
-    // 2. Search TMDB if type is 'all' or 'tv'
-    if (type === 'all' || type === 'tv') {
-      const tmdbResults = await searchTmdb(query.trim(), settings.tmdbApiKey);
-      tmdbResults.forEach(t => {
-        results.push({
-          id: `tmdb_${t.id}`,
-          source: 'tmdb',
-          mediaType: t.mediaType,
-          showType: t.showType,
-          name: t.name,
-          originalName: t.originalName,
-          tmdbId: t.id,
-          posterUrl: t.posterUrl,
-          backdropUrl: t.backdropUrl,
-          year: t.year,
-          country: t.country,
-          overview: t.overview
-        });
+    // 2. Search TMDB
+    const tmdbResults = await searchTmdb(query.trim(), settings.tmdbApiKey);
+    tmdbResults.forEach(t => {
+      // Filter based on tab: 'movie', 'tv', 'anime', or 'all'
+      if (type === 'movie' && t.mediaType !== 'movie') return;
+      if (type === 'tv' && t.mediaType !== 'tv') return;
+      if (type === 'anime' && t.showType !== 'Anime') return;
+
+      results.push({
+        id: `tmdb_${t.id}`,
+        source: 'tmdb',
+        mediaType: t.mediaType,
+        showType: t.showType,
+        name: t.name,
+        originalName: t.originalName,
+        tmdbId: t.id,
+        posterUrl: t.posterUrl,
+        backdropUrl: t.backdropUrl,
+        year: t.year,
+        country: t.country,
+        overview: t.overview
       });
-    }
+    });
 
     return res.json({ success: true, count: results.length, results });
   } catch (err) {
